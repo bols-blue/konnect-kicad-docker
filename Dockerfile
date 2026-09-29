@@ -24,6 +24,7 @@ ARG KONNECT_REF=main
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         protobuf-compiler \
+        libprotobuf-dev \
         pkg-config \
         libssl-dev \
         cmake \
