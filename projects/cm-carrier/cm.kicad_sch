@@ -4866,10 +4866,6 @@
 		)
 	)
 	(no_connect
-		(at 119.38 279.4)
-		(uuid "b1632c1f-e610-46f1-b6b8-5bf35d57c496")
-	)
-	(no_connect
 		(at 119.38 172.72)
 		(uuid "8cce050c-6581-4f64-9a93-7244c9a2436f")
 	)
@@ -5635,6 +5631,13 @@
 			(xy 182.88 218.44)
 		)
 		(uuid "0c41904b-4e18-42bd-9f27-3536b75fc542")
+	)
+	(wire
+		(pts
+			(xy 119.38 279.4)
+			(xy 116.84 279.4)
+		)
+		(uuid "18b9216c-ac74-489d-b4e4-ad4229f703c0")
 	)
 	(label "GND"
 		(at 180.34 154.94 0)
@@ -6740,6 +6743,17 @@
 			(justify left)
 		)
 		(uuid "62bc604b-b86c-44ab-b380-d066518131af")
+	)
+	(global_label "HUB_RESET_N"
+		(shape input)
+		(at 116.84 279.4 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "12ea58cf-84e6-4d9e-ae48-43aa9c31b359")
 	)
 	(symbol
 		(lib_id "CM5IO:ComputeModule5-CM5")

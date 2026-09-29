@@ -64,6 +64,35 @@
       )
     )
   )
+  (sheet
+    (at 130 30)
+    (size 40 25)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (fields_autoplaced yes)
+    (stroke (width 0.1524) (type solid))
+    (fill (color 0 0 0 0.0))
+    (uuid "daf61171-a259-4e10-b32c-e3bf0489fe40")
+    (property "Sheetname" "USB Hub"
+      (at 130 29.365 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left bottom))
+    )
+    (property "Sheetfile" "usb.kicad_sch"
+      (at 130 55.635 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left top))
+    )
+    (instances
+      (project "cm-carrier"
+        (path "/a976657b-65a0-4cc4-bafb-6280c56b6145" (page "4"))
+      )
+    )
+  )
   (sheet_instances
     (path "/"
       (page "1")
