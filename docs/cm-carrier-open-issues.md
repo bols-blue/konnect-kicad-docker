@@ -13,7 +13,7 @@
 | 4 | 🟡 | CM / LTE | GPIO の起動直後の状態の仮定: GPIO5(LTE_PWR_EN)はプルアップ、GPIO22/23(LTE_RESET / LTE_AIRPLANE)はプルダウン | BCM2711(CM4)の既定値(GPIO0〜8 がプルアップ、9 以降がプルダウン)による。**CM5(RP1)の既定値は未確認**。GPIO22/23 は 2N7002 のゲートを 100 kΩ で GND に落としているので、GPIO がハイインピーダンスでも安全側(リセットしない / 機内モードにしない)になる | CM5 / RP1 のデータシートで既定のプル設定を確認 | 未解決 |
 | 5 | 🔴→⚪ | CM / LTE | LTE の電源が切れている間に CM の GPIO が High だと、信号線から LTE モジュールに電流が逆流する恐れがある | **対策済み**: PERST# と W_DISABLE# を 2N7002 のオープンドレインで駆動(Q1/Q2)。GPIO と LTE のピンが直接つながらない。LTE_PWR_EN は DC-DC の EN、LTE_3V3_PG は CM への入力なので逆流しない | — | 対策済み |
 | 6 | 🟡 | CM | CC1/CC2(94/96)を未接続にしたので、CM5 が USB の給電を約 600 mA に制限する可能性がある | Pi 5 と同じ挙動なら。EEPROM の `PSU_MAX_CURRENT` などで解除できるかは未確認 | CM5 実機で `vcgencmd get_config usb_max_current_enable` などを確認 | 未解決 |
-| 7 | ⚪ | CM | CM コネクタは Hirose DF40 ではなく Amphenol 10164227-1001A1RLF ×2(公式シンボルの記載) | 公式 CM5 IO Board ライブラリの Field5 | 仕様書 §4 を修正する | 未解決 |
+| 7 | ⚪ | CM | CM コネクタは Hirose DF40 ではなく Amphenol 10164227-1001A1RLF ×2(公式シンボルの記載) | 公式 CM5 IO Board ライブラリの Field5 | 仕様書 §4 を修正済み | 解決 |
 | 8 | ⚪ | CM | 依頼外の追加: デバッグ UART ヘッダ(J2)、動作ランプ(D1/R3)、電源ボタン(SW1) | SW1 は CM5 では電源 ON/OFF、CM4 では RUN_PG によるリセットとして働く | 不要なら削除 | 要判断 |
 | 9 | 🟡 | USB | Type-C ポートの VBUS を常時出力にしている(Type-C 規格では、接続を検出してから出力する必要がある) | CC1/CC2 は Rp = 56 kΩ(5V へ)で Default USB Power を宣言しているだけ | 規格に合わせるなら TUSB320 などの CC 検出 IC で VBUS スイッチを制御する | 未解決 |
 | 10 | 🟡 | USB | 下流ポートの VBUS 容量は 10 µF / ポート。USB 2.0 規格が推奨する 120 µF / ポートより小さい | 公式 CM4 IO Board も 10 µF / ポート + 共通 100 µF | 必要なら XA ポートに大容量コンデンサを追加 | 未解決 |
@@ -28,3 +28,8 @@
 | 19 | 🟡 | LTE | 470 µF は「6.3 V・低 ESR の導電性高分子・8×10 mm」とだけ指定し、型番は未定。#1(TPS62132 の安定性)にも影響する | Quectel 3.2 節の「low ESR 470 µF」 | 型番を決めて ESR を確認し、#1 と合わせて評価 | 未解決 |
 | 20 | ⚪ | LTE | SIM ソケットはカード検出なし(GCT SIM8060)。USIM_PRESENCE は未接続 | ガイド「検出を使わない場合は未接続」 | ホットスワップが必要なら CUI NSIM-2-C(検出付き)に変更 | 採用 |
 | 21 | ⚪ | LTE | ガイドの電源の参考回路にある入力側の TVS(D1)は付けていない。5V は外部電源ボードから来る前提 | 当基板の 5V 入口の保護方針が未決定(#3 と同じ) | 電源ボードの仕様と合わせて判断 | 未解決 |
+| 22 | 🟡 | IO | HDMI の ESD 保護(TPD4EUSB30 ×3)は公式 CM5 IO Board には無く、当基板で追加した。DDC / CEC / HPD は 5V 系の信号で、TPD4EUSB30 の最大動作電圧が 5V に対して十分かは未確認 | CM5 datasheet 付録 B「CM4 にあった HDMI の ESD 保護を CM5 では削除」 | TPD4EUSB30 のデータシートで VRWM を確認。足りなければ DDC 系だけ 5V 対応品に変更 | 未解決 |
+| 23 | 🟡 | IO | CM の 3.3V 出力(最大 600 mA)に、USB ハブ・microSD・MagJack の LED・プルアップをぶら下げている。合計電流は未計算 | CM5 datasheet 3.4 | USB2514B と SD カードの最大電流をデータシートで確認し、合計を出す | 未解決 |
+| 24 | ⚪ | IO | MagJack の VC1〜4(PoE 用センタータップ)は未接続。公式 CM5 IO Board では PoE ヘッダへ出している | PoE は要件外 | ボブ・スミス終端が MagJack 内部にあるかをデータシートで確認 | 未解決 |
+| 25 | ⚪ | IO | HDMI 5V スイッチ(RT9742SNGV)と SD 電源スイッチ(RT9742GGJ5)は公式 CM5 IO Board と同じ構成。入力側のコンデンサは公式どおり省略 | 公式回路 | Richtek のデータシートで入力容量の推奨を確認 | 未解決 |
+| 26 | ⚪ | IO | microSD のカード検出(DET_A / DET_B)は未接続(公式と同じ)。ソケットは Hirose DM3AT。公式の Molex 503398 はシンボルとパッド名が合わないため変更 | — | — | 採用 |

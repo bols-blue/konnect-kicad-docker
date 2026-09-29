@@ -122,6 +122,35 @@
       )
     )
   )
+  (sheet
+    (at 230 30)
+    (size 40 25)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (fields_autoplaced yes)
+    (stroke (width 0.1524) (type solid))
+    (fill (color 0 0 0 0.0))
+    (uuid "0194b8e8-229b-47f3-b1ad-6f69c62a6e37")
+    (property "Sheetname" "IO (Ethernet, HDMI, microSD)"
+      (at 230 29.365 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left bottom))
+    )
+    (property "Sheetfile" "io.kicad_sch"
+      (at 230 55.635 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left top))
+    )
+    (instances
+      (project "cm-carrier"
+        (path "/a976657b-65a0-4cc4-bafb-6280c56b6145" (page "6"))
+      )
+    )
+  )
   (sheet_instances
     (path "/"
       (page "1")
