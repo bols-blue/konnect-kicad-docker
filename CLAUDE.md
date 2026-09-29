@@ -30,9 +30,9 @@ Konnect のツールに渡してもコンテナからは見えない。
 | PCB の基板情報・レイヤ・外形の読み書き | **可(GUI 起動時)** | IPC 経由。`get_board_info` / `get_layer_list` / `add_board_outline` / `save_project` で動作確認済み |
 | 回路図 → PCB 反映 | **可(GUI 起動時)** | `update_pcb_from_schematic`(dry run → apply)。フットプリント種別の変更は競合になるので、基板側を `delete_component` してから再反映する |
 | PCB のフットプリント配置・移動・回転 | **可(GUI 起動時)** | `set_component_placements` で確認済み |
-| 自動配線: DSN 出力 | **条件付き** | `export_specctra_dsn` はパッド形状 circle / rect のみ。**標準の SMD 受動部品 (roundrect) は拒否される** → GUI の ファイル > エクスポート > Specctra DSN を人間が使う |
+| 自動配線: DSN 出力 | **可(GUI 起動時)** | `export_specctra_dsn_native`(ローカルパッチ `patches/konnect/`)。KiCad 自身の Specctra 出力を ActionPlugin ブリッジ経由で呼ぶので roundrect / oval / NPTH / 円弧外形も可。Konnect 本来の `export_specctra_dsn` は circle / rect パッドのみ |
 | 自動配線: Freerouting (DSN → SES) | **可** | `route_specctra_dsn`。KiCad 本体が出力した DSN も可 |
-| 自動配線: SES 取り込み | **条件付き** | `plan_specctra_ses_import` → `apply_specctra_ses` は Konnect 自身が出力した DSN(+ manifest)にのみ使える。GUI で出力した DSN の場合は GUI の ファイル > インポート > Specctra Session を人間が使う |
+| 自動配線: SES 取り込み | **可(GUI 起動時)** | `import_specctra_ses_native`(同パッチ)。DSN 出力時の基板ハッシュと一致しないと拒否する(GUI で先に取り込んだ場合など)。取り込み後は `refill_zones` → `save_project` → DRC。`plan_specctra_ses_import` / `apply_specctra_ses` は Konnect 本来の DSN 専用 |
 | 配線の個別編集(トラック/ビア/ゾーン) | **可(GUI 起動時)・未検証** | 同じ IPC 経路。ビアを削除するツールは無い |
 | ライブ回路図ビューア | **不可** | システム WebView 依存でコンテナでは動かない |
 
@@ -51,6 +51,10 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
   `save_project` で保存してから DRC を `kicad-cli` で回す(DRC はファイルを読む)
 - ユーザーが GUI で同時に編集していると競合する。PCB 編集の前に一声かける
 - ファイルを手で書き換えて IPC の代わりにしない
+- native Specctra ブリッジは 127.0.0.1 で待ち受けるので、Konnect は GUI コンテナの
+  ネットワークに相乗りする(`scripts/konnect-mcp.sh` が自動判定)。順番は
+  **`make gui` → PCB エディタを開く → `/mcp` で konnect 再接続**。後から GUI を
+  作り直した(`make gui` をやり直した)ら再接続もやり直す
 - 既知の癖(Konnect 0.12.1 / KiCad 10.0.6、2026-09 の自動配線通し検証で確認):
   - `get_board_extents` は IPC 経由だと図形だけの基板を空(0)と返す。保存後はファイル経由で正しい値になる
   - `update_pcb_from_schematic` で追加したフットプリントは `(attr smd)` / descr / tags などが欠ける。
@@ -61,6 +65,9 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
     Konnect の DRC はこれを報告しないので、parity 付きの kicad-cli DRC を必ず回す
   - Freerouting は未使用ビアを残すことがある(`via_dangling`)。GUI の
     ツール > 配線とビアをクリーンアップ で消す
+  - KiCad が内層を power 層として DSN に出すと、Freerouting はその層のベタ(plane)へ
+    つなぐビアを打たない(4 層の cm-carrier で GND / +5V のビア 0)。signal 層として出すと打つが、
+    信号も内層に引かれる。class に `use_layer F.Cu B.Cu` を付けると再びビアが打たれなくなる
 
 ## 作業ルール
 

@@ -18,6 +18,8 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 IMAGE="${KONNECT_IMAGE:-konnect-kicad:10}"
 PROJECTS="${KONNECT_PROJECTS:-${ROOT}/projects}"
 IPC_DIR="${KONNECT_IPC_DIR:-${ROOT}/.kicad-ipc}"
+# KiCad ActionPlugin の native Specctra ブリッジ登録ファイル置き場 (GUI と MCP で共有)。
+BRIDGE_DIR="${KONNECT_BRIDGE_DIR_HOST:-${ROOT}/.kicad-bridge}"
 CONFIG_DIR="${KONNECT_GUI_CONFIG:-${ROOT}/.kicad-gui-config}"
 NAME="${KONNECT_GUI_NAME:-konnect-kicad-gui}"
 
@@ -35,7 +37,7 @@ if running; then
   exit 1
 fi
 
-mkdir -p "${PROJECTS}" "${IPC_DIR}"
+mkdir -p "${PROJECTS}" "${IPC_DIR}" "${BRIDGE_DIR}"
 
 # GUI の設定は永続化する。コンテナの HOME は毎回まっさらなので、そのままだと
 # 起動のたびに初回セットアップウィザードが出て IPC サーバの起動前で止まる。
@@ -58,6 +60,7 @@ args=(
   --volume /tmp/.X11-unix:/tmp/.X11-unix:ro
   --volume "${PROJECTS}:/work"
   --volume "${IPC_DIR}:/tmp/kicad"
+  --volume "${BRIDGE_DIR}:/konnect-bridge"
   --volume "${CONFIG_DIR}:/konnect-home/.config/kicad"
   --workdir /work
 )
@@ -85,6 +88,7 @@ echo "KiCad GUI 起動待ち (初回はセットアップウィザードを完�
 for _ in $(seq 1 "${KONNECT_GUI_TIMEOUT:-300}"); do
   if [ -S "${IPC_DIR}/api.sock" ]; then
     echo "KiCad GUI 起動: ${NAME} (IPC: ${IPC_DIR}/api.sock)"
+    echo "native Specctra ブリッジを使う場合: Konnect を GUI のネットワークに載せるため Claude Code の /mcp で konnect を再接続すること" >&2
     exit 0
   fi
   running || { echo "KiCad が起動直後に終了した (--rm のためログは残らない。KONNECT_GUI_DEBUG=1 で前面実行して確認)" >&2; exit 1; }

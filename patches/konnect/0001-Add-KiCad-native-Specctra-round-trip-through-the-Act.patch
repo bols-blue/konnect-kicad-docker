@@ -1,0 +1,1420 @@
+From 0a459c65afbcb28f9861134588f9daa1795c1bb1 Mon Sep 17 00:00:00 2001
+From: konnect-patch <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 15:01:19 +0900
+Subject: [PATCH] Add KiCad-native Specctra round trip through the ActionPlugin
+ bridge
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Konnect's own Specctra exporter deliberately supports a narrow profile
+(circle/rect pads, straight outline, no NPTH), so most real boards —
+every KiCad standard SMD passive uses rounded-rectangle pads — cannot be
+exported, and the strict SES importer only accepts sessions routed from
+that exporter's DSN.
+
+Add two tools that delegate the geometry to KiCad itself:
+
+- export_specctra_dsn_native (pcb_export): KiCad's own DSN via the
+  authenticated ActionPlugin bridge, plus a manifest binding the DSN to
+  the SHA-256 of the exact live IPC board snapshot.
+- import_specctra_ses_native (pcb_routing): refuses unless the live board
+  is byte-identical to the exported revision, then asks the plugin to run
+  pcbnew.ImportSpecctraSES (File > Import > Specctra Session) on the
+  active board, leaving it modified and unsaved.
+
+The plugin gains a POST /v1/import-specctra-ses operation; the status
+response is unchanged so older Rust clients keep working, and a plugin
+without the operation is reported as needing an update (404).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ DEV.md                                        |   6 +-
+ README.md                                     |   4 +-
+ crates/konnect-core/src/lib.rs                |   1 +
+ crates/konnect-core/src/native_specctra.rs    | 147 ++++++++
+ .../src/native_specctra_bridge.rs             | 349 ++++++++++++++++--
+ crates/konnect-core/src/router/registry.rs    |   8 +-
+ crates/konnect-core/src/tools/pcb_export.rs   | 167 +++++++++
+ crates/konnect-core/src/tools/pcb_routing.rs  | 141 +++++++
+ docs/TROUBLESHOOTING.md                       |   2 +-
+ packaging/metadata.json                       |   2 +-
+ plugin/native_bridge.py                       | 111 +++++-
+ plugin/plugin.json                            |   2 +-
+ plugin/tests/test_native_bridge.py            |  73 ++++
+ tool-directory.md                             |  10 +-
+ 14 files changed, 972 insertions(+), 51 deletions(-)
+ create mode 100644 crates/konnect-core/src/native_specctra.rs
+
+diff --git a/DEV.md b/DEV.md
+index 7dbfa7c..7521f99 100644
+--- a/DEV.md
++++ b/DEV.md
+@@ -366,7 +366,7 @@ Source: [`crates/konnect-core/src/observability.rs`](crates/konnect-core/src/obs
+ 
+ ## Tool Routing (Starter Kit + On-Demand Loading)
+ 
+-The server does NOT expose all 226 tools (233 total with the 7 meta-tools) in `tools/list` by default — that would cost ~23K tokens of context on every listing. Instead:
++The server does NOT expose all 228 tools (235 total with the 7 meta-tools) in `tools/list` by default — that would cost ~23K tokens of context on every listing. Instead:
+ 
+ - **Startup**: only `STARTER_KIT` toolsets are pre-loaded (see `router/registry.rs::STARTER_KIT`). Currently: `project`, `config`. Combined with the 7 meta-tools, baseline `tools/list` is 21 tools ≈ 2K tokens.
+ - **On demand**: the LLM reads `list_toolboxes` → calls `load_toolset(name)` to expose a toolset's tools in subsequent `tools/list` responses. `unload_toolset(name)` prunes them when the task shifts.
+@@ -451,12 +451,12 @@ direct handler calls still require checked readers for their domain rules.
+ 
+ ## Current Stats
+ 
+-- **21 toolsets, 226 tools** + 7 meta-tools (4 routing + 2 observability + 1 runtime diagnostic — see `tool-directory.md`)
++- **21 toolsets, 228 tools** + 7 meta-tools (4 routing + 2 observability + 1 runtime diagnostic — see `tool-directory.md`)
+ - The standalone Unix executable adds one conditional stdio maintenance meta-tool,
+   `reload_server`; it is not registered for an embedded server, HTTP, mixed
+   transport, or Windows.
+ - Baseline `tools/list`: 21 tools / ~2K tokens (starter kit + meta-tools)
+-- Full-catalog `tools/list` (all loaded): 233 tools (226 registered + 7 meta) / ~25K tokens
++- Full-catalog `tools/list` (all loaded): 235 tools (228 registered + 7 meta) / ~25K tokens
+ - **0 IPC stubs** (all protobuf methods implemented)
+ - **0 unimplemented tools**
+ - **Specctra DSN/SES are PCB-editor operations**, not `kicad-cli` commands.
+diff --git a/README.md b/README.md
+index 04c8229..4101a85 100644
+--- a/README.md
++++ b/README.md
+@@ -13,7 +13,7 @@
+ Rust binary — that lets Claude and other AI assistants design schematics and PCBs
+ through the [Model Context Protocol](https://modelcontextprotocol.io) (MCP).
+ 
+-**226 tools across 21 on-demand toolsets.** Schematic capture, PCB layout and
++**228 tools across 21 on-demand toolsets.** Schematic capture, PCB layout and
+ routing, ERC/DRC, design-review audits, JLCPCB part search, reference
+ circuits, and a full manufacturing export pipeline — with bundled skills and agents
+ that teach Claude KiCAD conventions out of the box.
+@@ -70,7 +70,7 @@ through its own S-expression engine with atomic writes (write, fsync, rename), U
+ preservation, and round-trip tests — no third-party schematic library with known
+ gaps, no text-manipulation workarounds.
+ 
+-**Context economy is a feature.** Exposing all 226 tools to an LLM costs roughly 23K
++**Context economy is a feature.** Exposing all 228 tools to an LLM costs roughly 23K
+ tokens of context on every listing. Konnect's router loads a starter kit (~2K
+ tokens) and lets the model pull in toolsets on demand — plus built-in observability
+ (`get_recent_calls`, `server_stats`, JSONL call logs) so the model can diagnose its
+diff --git a/crates/konnect-core/src/lib.rs b/crates/konnect-core/src/lib.rs
+index ec2cac3..1b769fb 100644
+--- a/crates/konnect-core/src/lib.rs
++++ b/crates/konnect-core/src/lib.rs
+@@ -4,6 +4,7 @@ pub(crate) mod freerouting_mcp;
+ pub mod gates;
+ pub mod kicad_install;
+ pub mod mcp;
++pub(crate) mod native_specctra;
+ pub(crate) mod native_specctra_bridge;
+ pub mod observability;
+ pub mod outcome;
+diff --git a/crates/konnect-core/src/native_specctra.rs b/crates/konnect-core/src/native_specctra.rs
+new file mode 100644
+index 0000000..30d8617
+--- /dev/null
++++ b/crates/konnect-core/src/native_specctra.rs
+@@ -0,0 +1,147 @@
++//! KiCad-native Specctra round trip (KiCad 10 ActionPlugin bridge).
++//!
++//! Konnect's own exporter (`specctra.rs`) deliberately supports a narrow board
++//! profile so that its reverse manifest can prove every imported track. Real
++//! boards routinely leave that profile (rounded-rectangle SMD pads, oval
++//! through-hole pads, NPTH pegs, arc outlines). This module backs the
++//! alternative route: KiCad itself writes the DSN and later imports the SES,
++//! exactly as File > Export/Import Specctra does in the PCB Editor.
++//!
++//! What Konnect still guarantees on this path is revision binding: the manifest
++//! records the SHA-256 of the IPC board snapshot the DSN was exported from, and
++//! the import refuses unless the live board is byte-identical to it, so a
++//! session routed for one revision is never applied to another.
++
++use anyhow::{bail, Context, Result};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use std::path::Path;
++
++pub(crate) const MANIFEST_KIND: &str = "konnect_kicad_native_specctra";
++pub(crate) const MANIFEST_VERSION: u32 = 1;
++pub(crate) const MAX_SES_BYTES: u64 = 512 * 1024 * 1024;
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct NativeManifest {
++    pub kind: String,
++    pub version: u32,
++    /// Canonical path of the board the DSN was exported from.
++    pub board: String,
++    /// SHA-256 of the KiCad IPC board snapshot at export time.
++    pub source_sha256: String,
++    /// SHA-256 of the DSN text KiCad produced.
++    pub dsn_sha256: String,
++    /// Canonical-at-write path of the DSN file.
++    pub dsn_path: String,
++}
++
++pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
++    let digest = Sha256::digest(bytes);
++    digest.iter().map(|byte| format!("{byte:02x}")).collect()
++}
++
++pub(crate) fn build_manifest(board: &Path, source: &str, dsn: &str, dsn_path: &Path) -> NativeManifest {
++    NativeManifest {
++        kind: MANIFEST_KIND.to_string(),
++        version: MANIFEST_VERSION,
++        board: board.display().to_string(),
++        source_sha256: sha256_hex(source.as_bytes()),
++        dsn_sha256: sha256_hex(dsn.as_bytes()),
++        dsn_path: dsn_path.display().to_string(),
++    }
++}
++
++/// Parse a manifest and prove it belongs to `board` (already canonical).
++pub(crate) fn parse_manifest(text: &str, board: &Path) -> Result<NativeManifest> {
++    let manifest: NativeManifest =
++        serde_json::from_str(text).context("parse KiCad-native Specctra manifest")?;
++    if manifest.kind != MANIFEST_KIND || manifest.version != MANIFEST_VERSION {
++        bail!(
++            "manifest kind/version '{}'/{} is not a KiCad-native Specctra manifest (expected '{}'/{}); \
++             Konnect-exporter manifests are imported with apply_specctra_ses",
++            manifest.kind,
++            manifest.version,
++            MANIFEST_KIND,
++            MANIFEST_VERSION
++        );
++    }
++    if Path::new(&manifest.board) != board {
++        bail!(
++            "manifest was written for board '{}', not '{}'",
++            manifest.board,
++            board.display()
++        );
++    }
++    if manifest.source_sha256.len() != 64 || manifest.dsn_sha256.len() != 64 {
++        bail!("manifest digests are malformed");
++    }
++    Ok(manifest)
++}
++
++/// Counts of routed objects a Freerouting session carries, for reporting.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
++pub(crate) struct SesStats {
++    pub wires: u64,
++    pub vias: u64,
++}
++
++/// Minimal structural check of a Specctra session before KiCad sees it.
++pub(crate) fn inspect_ses(text: &str) -> Result<SesStats> {
++    let trimmed = text.trim_start();
++    if !trimmed.starts_with("(session") {
++        bail!("file is not a Specctra session (expected a leading '(session')");
++    }
++    if !text.contains("(routes") {
++        bail!("Specctra session has no (routes ...) section");
++    }
++    let count = |needle: &str| text.matches(needle).count() as u64;
++    Ok(SesStats {
++        wires: count("(wire"),
++        vias: count("(via "),
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn manifest_round_trips_and_binds_to_its_board() {
++        let board = Path::new("/work/demo/demo.kicad_pcb");
++        let manifest = build_manifest(board, "(kicad_pcb)", "(pcb demo)", Path::new("/work/demo/demo.dsn"));
++        let text = serde_json::to_string(&manifest).unwrap();
++        assert_eq!(parse_manifest(&text, board).unwrap(), manifest);
++        let other = Path::new("/work/other/other.kicad_pcb");
++        let error = parse_manifest(&text, other).unwrap_err().to_string();
++        assert!(error.contains("written for board"), "{error}");
++    }
++
++    #[test]
++    fn konnect_exporter_manifests_are_not_accepted() {
++        let board = Path::new("/work/demo/demo.kicad_pcb");
++        let mut manifest = build_manifest(board, "a", "b", Path::new("/work/demo/demo.dsn"));
++        manifest.kind = "konnect_specctra".to_string();
++        let error = parse_manifest(&serde_json::to_string(&manifest).unwrap(), board)
++            .unwrap_err()
++            .to_string();
++        assert!(error.contains("apply_specctra_ses"), "{error}");
++    }
++
++    #[test]
++    fn source_digest_changes_with_the_board_revision() {
++        let board = Path::new("/work/demo/demo.kicad_pcb");
++        let a = build_manifest(board, "(kicad_pcb rev1)", "d", Path::new("/d.dsn"));
++        let b = build_manifest(board, "(kicad_pcb rev2)", "d", Path::new("/d.dsn"));
++        assert_ne!(a.source_sha256, b.source_sha256);
++        assert_eq!(a.source_sha256.len(), 64);
++    }
++
++    #[test]
++    fn session_inspection_counts_wiring_and_rejects_non_sessions() {
++        let ses = "(session demo\n (routes\n  (network_out\n   (net GND\n    (wire (path F.Cu 2000 0 0 10 10))\n    (wire (path B.Cu 2000 10 10 20 20))\n    (via via0 10 10)\n   )\n  )\n )\n)\n";
++        assert_eq!(inspect_ses(ses).unwrap(), SesStats { wires: 2, vias: 1 });
++        assert!(inspect_ses("(pcb demo)").is_err());
++        assert!(inspect_ses("(session demo)").is_err());
++    }
++}
+diff --git a/crates/konnect-core/src/native_specctra_bridge.rs b/crates/konnect-core/src/native_specctra_bridge.rs
+index 14e689f..99953dd 100644
+--- a/crates/konnect-core/src/native_specctra_bridge.rs
++++ b/crates/konnect-core/src/native_specctra_bridge.rs
+@@ -1,4 +1,5 @@
+-//! Optional KiCad 10 native Specctra export through Konnect's legacy ActionPlugin.
++//! Optional KiCad 10 native Specctra export and session import through
++//! Konnect's legacy ActionPlugin.
+ //!
+ //! The bridge is deliberately capability-scoped. It may export the active
+ //! board into its own private temporary directory; it cannot execute arbitrary
+@@ -27,6 +28,23 @@ pub(crate) struct NativeExportAttempt {
+     pub diagnostics: Vec<String>,
+ }
+ 
++/// Result of KiCad's own Specctra session importer running on the active board.
++#[derive(Debug, Clone)]
++pub(crate) struct NativeImport {
++    pub plugin_pid: u32,
++    pub protocol_version: u32,
++    pub tracks_before: u64,
++    pub vias_before: u64,
++    pub tracks_after: u64,
++    pub vias_after: u64,
++}
++
++#[derive(Debug, Default)]
++pub(crate) struct NativeImportAttempt {
++    pub import: Option<NativeImport>,
++    pub diagnostics: Vec<String>,
++}
++
+ #[derive(Debug, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ struct Registration {
+@@ -51,6 +69,27 @@ struct ExportRequest<'a> {
+     expected_board: &'a str,
+ }
+ 
++#[derive(Debug, Serialize)]
++struct ImportRequest<'a> {
++    expected_board: &'a str,
++    ses_path: &'a str,
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(deny_unknown_fields)]
++struct ImportResponse {
++    success: bool,
++    protocol_version: u32,
++    pid: u32,
++    board_path: String,
++    ses_path: String,
++    ses_bytes: u64,
++    tracks_before: u64,
++    vias_before: u64,
++    tracks_after: u64,
++    vias_after: u64,
++}
++
+ #[derive(Debug, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ struct ExportResponse {
+@@ -62,35 +101,43 @@ struct ExportResponse {
+     dsn_bytes: u64,
+ }
+ 
+-pub(crate) async fn try_export(board: &Path) -> NativeExportAttempt {
+-    let mut attempt = NativeExportAttempt::default();
++/// Registration root, discovered registrations and the canonical board, or the
++/// diagnostics explaining why no bridge can be tried.
++fn discover(board: &Path) -> std::result::Result<(PathBuf, Vec<PathBuf>, PathBuf), Vec<String>> {
+     let Some(root) = registration_root() else {
+-        attempt
+-            .diagnostics
+-            .push("native bridge registration directory is unavailable".to_string());
+-        return attempt;
++        return Err(vec![
++            "native bridge registration directory is unavailable".to_string()
++        ]);
+     };
+     let entries = match registrations(&root) {
+         Ok(entries) => entries,
+-        Err(error) => {
+-            attempt
+-                .diagnostics
+-                .push(format!("native bridge discovery failed: {error:#}"));
+-            return attempt;
+-        }
++        Err(error) => return Err(vec![format!("native bridge discovery failed: {error:#}")]),
+     };
+     if entries.is_empty() {
+-        attempt
+-            .diagnostics
+-            .push("no enabled KiCad 10 native bridge registration was found".to_string());
+-        return attempt;
++        return Err(vec![
++            "no enabled KiCad 10 native bridge registration was found".to_string(),
++        ]);
+     }
+     let board = match board.canonicalize() {
+         Ok(board) => board,
+-        Err(error) => {
+-            attempt
+-                .diagnostics
+-                .push(format!("resolve requested board failed: {error}"));
++        Err(error) => return Err(vec![format!("resolve requested board failed: {error}")]),
++    };
++    Ok((root, entries, board))
++}
++
++fn registration_label(registration_path: &Path) -> &str {
++    registration_path
++        .file_name()
++        .and_then(|name| name.to_str())
++        .unwrap_or("native bridge registration")
++}
++
++pub(crate) async fn try_export(board: &Path) -> NativeExportAttempt {
++    let mut attempt = NativeExportAttempt::default();
++    let (root, entries, board) = match discover(board) {
++        Ok(found) => found,
++        Err(diagnostics) => {
++            attempt.diagnostics = diagnostics;
+             return attempt;
+         }
+     };
+@@ -102,10 +149,34 @@ pub(crate) async fn try_export(board: &Path) -> NativeExportAttempt {
+             }
+             Err(error) => attempt.diagnostics.push(format!(
+                 "{}: {error:#}",
+-                registration_path
+-                    .file_name()
+-                    .and_then(|name| name.to_str())
+-                    .unwrap_or("native bridge registration")
++                registration_label(&registration_path)
++            )),
++        }
++    }
++    attempt
++}
++
++/// Ask the PCB Editor that owns `board` to run KiCad's own Specctra session
++/// importer on it. `ses_path` must be readable by the KiCad process at the
++/// same absolute path; the board is left modified and unsaved.
++pub(crate) async fn try_import_ses(board: &Path, ses_path: &Path) -> NativeImportAttempt {
++    let mut attempt = NativeImportAttempt::default();
++    let (_root, entries, board) = match discover(board) {
++        Ok(found) => found,
++        Err(diagnostics) => {
++            attempt.diagnostics = diagnostics;
++            return attempt;
++        }
++    };
++    for registration_path in entries {
++        match try_import_registration(&registration_path, &board, ses_path).await {
++            Ok(import) => {
++                attempt.import = Some(import);
++                return attempt;
++            }
++            Err(error) => attempt.diagnostics.push(format!(
++                "{}: {error:#}",
++                registration_label(&registration_path)
+             )),
+         }
+     }
+@@ -136,11 +207,12 @@ fn registrations(root: &Path) -> Result<Vec<PathBuf>> {
+     Ok(entries)
+ }
+ 
+-async fn try_registration(
+-    root: &Path,
++/// Read and validate one registration, then prove its status endpoint answers
++/// for the same plugin process with the registration's bearer token.
++async fn connect(
+     registration_path: &Path,
+-    board: &Path,
+-) -> Result<NativeExport> {
++    timeout: Duration,
++) -> Result<(Registration, reqwest::Client)> {
+     let registration_source = std::fs::read_to_string(registration_path)
+         .with_context(|| format!("read {}", registration_path.display()))?;
+     let registration: Registration =
+@@ -149,7 +221,7 @@ async fn try_registration(
+ 
+     let client = reqwest::Client::builder()
+         .connect_timeout(Duration::from_secs(2))
+-        .timeout(Duration::from_secs(35))
++        .timeout(timeout)
+         .redirect(reqwest::redirect::Policy::none())
+         .build()
+         .context("build native bridge HTTP client")?;
+@@ -171,7 +243,15 @@ async fn try_registration(
+     {
+         bail!("native bridge status does not match its registration");
+     }
++    Ok((registration, client))
++}
+ 
++async fn try_registration(
++    root: &Path,
++    registration_path: &Path,
++    board: &Path,
++) -> Result<NativeExport> {
++    let (registration, client) = connect(registration_path, Duration::from_secs(35)).await?;
+     let board_text = board
+         .to_str()
+         .with_context(|| format!("board path is not UTF-8: {}", board.display()))?;
+@@ -222,6 +302,93 @@ async fn try_registration(
+     })
+ }
+ 
++async fn try_import_registration(
++    registration_path: &Path,
++    board: &Path,
++    ses_path: &Path,
++) -> Result<NativeImport> {
++    // KiCad's importer runs on the UI thread; the plugin allows it 120 s.
++    let (registration, client) = connect(registration_path, Duration::from_secs(125)).await?;
++    let board_text = board
++        .to_str()
++        .with_context(|| format!("board path is not UTF-8: {}", board.display()))?;
++    let ses_text = ses_path
++        .to_str()
++        .with_context(|| format!("SES path is not UTF-8: {}", ses_path.display()))?;
++    let response = client
++        .post(format!("{}/v1/import-specctra-ses", registration.address))
++        .bearer_auth(&registration.token)
++        .json(&ImportRequest {
++            expected_board: board_text,
++            ses_path: ses_text,
++        })
++        .send()
++        .await
++        .context("request native Specctra session import")?;
++    if response.status() == reqwest::StatusCode::NOT_FOUND {
++        bail!("native bridge plugin predates Specctra session import; update the Konnect ActionPlugin");
++    }
++    if !response.status().is_success() {
++        let status = response.status();
++        let detail = response
++            .json::<serde_json::Value>()
++            .await
++            .ok()
++            .and_then(|body| body["error"].as_str().map(str::to_string))
++            .unwrap_or_default();
++        bail!("native Specctra session import refused ({status}): {detail}");
++    }
++    let response: ImportResponse = response
++        .json()
++        .await
++        .context("parse native Specctra session import response")?;
++    validate_import_response(&registration, &response, board, ses_path)?;
++    Ok(NativeImport {
++        plugin_pid: response.pid,
++        protocol_version: response.protocol_version,
++        tracks_before: response.tracks_before,
++        vias_before: response.vias_before,
++        tracks_after: response.tracks_after,
++        vias_after: response.vias_after,
++    })
++}
++
++fn validate_import_response(
++    registration: &Registration,
++    response: &ImportResponse,
++    board: &Path,
++    ses_path: &Path,
++) -> Result<()> {
++    if !response.success
++        || response.protocol_version != registration.protocol_version
++        || response.pid != registration.pid
++        || response.ses_bytes == 0
++    {
++        bail!("native bridge import response is invalid");
++    }
++    let active_board = Path::new(&response.board_path)
++        .canonicalize()
++        .with_context(|| format!("resolve active bridge board {}", response.board_path))?;
++    let requested_board = board
++        .canonicalize()
++        .with_context(|| format!("resolve requested bridge board {}", board.display()))?;
++    if active_board != requested_board {
++        bail!(
++            "native bridge board '{}' does not match requested board '{}'",
++            active_board.display(),
++            requested_board.display()
++        );
++    }
++    if Path::new(&response.ses_path) != ses_path {
++        bail!(
++            "native bridge imported '{}' instead of requested session '{}'",
++            response.ses_path,
++            ses_path.display()
++        );
++    }
++    Ok(())
++}
++
+ fn validate_registration(registration: &Registration) -> Result<()> {
+     if registration.protocol_version != PROTOCOL_VERSION
+         || registration.pid == 0
+@@ -394,4 +561,126 @@ mod tests {
+             "Rust must consume the private bridge artifact"
+         );
+     }
++
++    /// Serve `responses` in order as `(status, body)` and hand back the port.
++    async fn mock_bridge(
++        responses: Vec<(u16, serde_json::Value)>,
++    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = listener.local_addr().unwrap().port();
++        let server = tokio::spawn(async move {
++            let mut requests = Vec::new();
++            for (status, response) in responses {
++                let (mut stream, _) = listener.accept().await.unwrap();
++                let mut request = vec![0u8; 16 * 1024];
++                let count = stream.read(&mut request).await.unwrap();
++                requests.push(String::from_utf8_lossy(&request[..count]).to_string());
++                let body = response.to_string();
++                let reason = if status == 200 { "OK" } else { "Not Found" };
++                let reply = format!(
++                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
++                    body.len(), body
++                );
++                stream.write_all(reply.as_bytes()).await.unwrap();
++            }
++            requests
++        });
++        (port, server)
++    }
++
++    fn write_registration(root: &Path, port: u16) -> PathBuf {
++        std::fs::create_dir_all(root).unwrap();
++        let path = root.join("bridge-42.json");
++        std::fs::write(
++            &path,
++            serde_json::json!({
++                "protocol_version": 1,
++                "pid": 42,
++                "address": format!("http://127.0.0.1:{port}"),
++                "token": "t".repeat(32),
++                "started_at_unix": 1.0
++            })
++            .to_string(),
++        )
++        .unwrap();
++        path
++    }
++
++    fn status_ok() -> (u16, serde_json::Value) {
++        (
++            200,
++            serde_json::json!({
++                "success": true,
++                "protocol_version": 1,
++                "pid": 42,
++                "native_specctra_export": true
++            }),
++        )
++    }
++
++    #[tokio::test]
++    async fn authenticated_import_posts_board_and_session_and_reports_counts() {
++        let temp = tempfile::tempdir().unwrap();
++        let board = temp.path().join("board.kicad_pcb");
++        std::fs::write(&board, "(kicad_pcb)\n").unwrap();
++        let ses = temp.path().join("routed.ses");
++        std::fs::write(&ses, "(session routed (routes))\n").unwrap();
++        let board = board.canonicalize().unwrap();
++        let ses = ses.canonicalize().unwrap();
++        let (port, server) = mock_bridge(vec![
++            status_ok(),
++            (
++                200,
++                serde_json::json!({
++                    "success": true,
++                    "protocol_version": 1,
++                    "pid": 42,
++                    "board_path": board.display().to_string(),
++                    "ses_path": ses.display().to_string(),
++                    "ses_bytes": 26,
++                    "tracks_before": 0,
++                    "vias_before": 0,
++                    "tracks_after": 12,
++                    "vias_after": 3
++                }),
++            ),
++        ])
++        .await;
++        let registration = write_registration(&temp.path().join("native-bridge"), port);
++        let import = try_import_registration(&registration, &board, &ses)
++            .await
++            .unwrap();
++        let requests = server.await.unwrap();
++        assert!(requests[1].starts_with("POST /v1/import-specctra-ses"));
++        assert!(requests[1].contains(&ses.display().to_string()));
++        assert!(requests[1]
++            .to_ascii_lowercase()
++            .contains("authorization: bearer tttttttttttttttttttttttttttttttt"));
++        assert_eq!((import.tracks_after, import.vias_after), (12, 3));
++        assert_eq!(import.plugin_pid, 42);
++    }
++
++    #[tokio::test]
++    async fn import_reports_a_plugin_that_predates_session_import() {
++        let temp = tempfile::tempdir().unwrap();
++        let board = temp.path().join("board.kicad_pcb");
++        std::fs::write(&board, "(kicad_pcb)\n").unwrap();
++        let ses = temp.path().join("routed.ses");
++        std::fs::write(&ses, "(session routed (routes))\n").unwrap();
++        let (port, server) = mock_bridge(vec![
++            status_ok(),
++            (
++                404,
++                serde_json::json!({"success": false, "error": "unknown operation"}),
++            ),
++        ])
++        .await;
++        let registration = write_registration(&temp.path().join("native-bridge"), port);
++        let error = try_import_registration(&registration, &board, &ses)
++            .await
++            .unwrap_err()
++            .to_string();
++        server.await.unwrap();
++        assert!(error.contains("predates Specctra session import"), "{error}");
++    }
+ }
+diff --git a/crates/konnect-core/src/router/registry.rs b/crates/konnect-core/src/router/registry.rs
+index da1545a..59e81d0 100644
+--- a/crates/konnect-core/src/router/registry.rs
++++ b/crates/konnect-core/src/router/registry.rs
+@@ -88,9 +88,9 @@ pub static ALL_TOOLSETS: &[ToolsetMeta] = &[
+     },
+     ToolsetMeta {
+         name: "pcb_routing",
+-        description: "Traces, vias, copper pours, net classes, differential pairs, and strict Specctra SES import",
++        description: "Traces, vias, copper pours, net classes, differential pairs, and strict or KiCad-native Specctra SES import",
+         category: "pcb",
+-        tool_count: 15,
++        tool_count: 16,
+     },
+     ToolsetMeta {
+         name: "placement",
+@@ -100,9 +100,9 @@ pub static ALL_TOOLSETS: &[ToolsetMeta] = &[
+     },
+     ToolsetMeta {
+         name: "pcb_export",
+-        description: "Gerber, PDF, SVG, 3D model, BOM, Specctra DSN, pick-and-place, DRC, DXF/GenCAD/IPC-2581/ODB++",
++        description: "Gerber, PDF, SVG, 3D model, BOM, Specctra DSN (Konnect or KiCad-native), pick-and-place, DRC, DXF/GenCAD/IPC-2581/ODB++",
+         category: "pcb",
+-        tool_count: 14,
++        tool_count: 15,
+     },
+     ToolsetMeta {
+         name: "library",
+diff --git a/crates/konnect-core/src/tools/pcb_export.rs b/crates/konnect-core/src/tools/pcb_export.rs
+index 6af1616..983e53a 100644
+--- a/crates/konnect-core/src/tools/pcb_export.rs
++++ b/crates/konnect-core/src/tools/pcb_export.rs
+@@ -287,6 +287,36 @@ pub fn tools() -> Vec<ToolDef> {
+             }),
+             |args, ctx| async move { handle_export_specctra_dsn(args, ctx).await }
+         ),
++        tool!(
++            "export_specctra_dsn_native",
++            "Export a Specctra DSN written by KiCad itself (the PCB Editor's File > Export > \
++             Specctra DSN) through the authenticated KiCad 10 ActionPlugin bridge. Unlike \
++             export_specctra_dsn it accepts any board KiCad can export — rounded-rectangle and \
++             oval pads, NPTH holes, arc outlines — because it does not re-model the board. \
++             Writes a manifest binding the DSN to the SHA-256 of the exact live board revision; \
++             route it with route_specctra_dsn and apply the result with \
++             import_specctra_ses_native. Requires the board open in KiCad with the Konnect \
++             ActionPlugin bridge enabled.",
++            json!({
++                "type": "object",
++                "properties": {
++                    "board": {
++                        "type": "string",
++                        "description": "Path to the .kicad_pcb file currently open in KiCad PCB Editor"
++                    },
++                    "output": {
++                        "type": "string",
++                        "description": "New .dsn file path. Existing files are never replaced."
++                    },
++                    "manifest_output_path": {
++                        "type": "string",
++                        "description": "Optional new manifest JSON path. Defaults to <output>.konnect-native.json. Existing files are never replaced."
++                    }
++                },
++                "required": ["board", "output"]
++            }),
++            |args, ctx| async move { handle_export_specctra_dsn_native(args, ctx).await }
++        ),
+         tool!(
+             "export_position_file",
+             "Generate a component placement (pick-and-place) position file for SMT assembly. \
+@@ -693,6 +723,143 @@ fn write_specctra_export_pair(
+     Ok(())
+ }
+ 
++fn default_native_specctra_manifest_path(output_path: &Path) -> PathBuf {
++    let mut name = output_path.as_os_str().to_os_string();
++    name.push(".konnect-native.json");
++    PathBuf::from(name)
++}
++
++async fn handle_export_specctra_dsn_native(
++    args: &serde_json::Value,
++    ctx: &ToolContext,
++) -> anyhow::Result<CallToolResult> {
++    let board_path = get_path(args, "board")?;
++    let output_path = get_path(args, "output")?;
++    let manifest_output_path = args["manifest_output_path"]
++        .as_str()
++        .map(PathBuf::from)
++        .unwrap_or_else(|| default_native_specctra_manifest_path(&output_path));
++
++    if !extension_is(&board_path, "kicad_pcb") {
++        return Ok(invalid_export_argument(
++            "board",
++            "must have the .kicad_pcb extension",
++        ));
++    }
++    if !extension_is(&output_path, "dsn") {
++        return Ok(invalid_export_argument(
++            "output",
++            "must have the .dsn extension",
++        ));
++    }
++    if output_path == manifest_output_path {
++        return Ok(invalid_export_argument(
++            "manifest_output_path",
++            "must not name the DSN output path",
++        ));
++    }
++    let conflicts = existing_export_targets(&[&output_path, &manifest_output_path]);
++    if !conflicts.is_empty() {
++        return Ok(CallToolResult::error_kind(
++            ToolErrorKind::Conflict {
++                paths: conflicts.clone(),
++            },
++            format!(
++                "Specctra export is non-destructive; remove or choose new output paths: {}",
++                conflicts.join(", ")
++            ),
++        ));
++    }
++    let board_path = board_path
++        .canonicalize()
++        .with_context(|| format!("resolve board {}", board_path.display()))?;
++
++    let snapshot = |board: PathBuf, addr: String| async move {
++        with_ipc(addr, move |client| {
++            let document = client.find_open_board(&board)?;
++            client.save_document_to_string_in(document)
++        })
++        .await
++    };
++    let before = match snapshot(board_path.clone(), ctx.config.ipc_address.clone()).await? {
++        Ok(before) => before,
++        Err(reason) => {
++            return Ok(CallToolResult::error_kind(
++                ToolErrorKind::HandlerError {
++                    reason: reason.clone(),
++                },
++                format!("KiCad-native Specctra export needs the board open in KiCad: {reason}"),
++            ));
++        }
++    };
++    let attempt = crate::native_specctra_bridge::try_export(&board_path).await;
++    let Some(native) = attempt.export else {
++        return Ok(CallToolResult::error(format!(
++            "KiCad 10 native Specctra bridge is unavailable (enable the Konnect ActionPlugin bridge in KiCad): {}",
++            attempt.diagnostics.join("; ")
++        )));
++    };
++    let after = match snapshot(board_path.clone(), ctx.config.ipc_address.clone()).await? {
++        Ok(after) => after,
++        Err(reason) => {
++            return Ok(CallToolResult::error(format!(
++                "KiCad board could not be re-read after native export: {reason}"
++            )));
++        }
++    };
++    if after != before {
++        return Ok(CallToolResult::error_kind(
++            ToolErrorKind::Conflict {
++                paths: vec![board_path.display().to_string()],
++            },
++            "KiCad board changed during native Specctra export; retry from a stable editor revision",
++        ));
++    }
++
++    let manifest =
++        crate::native_specctra::build_manifest(&board_path, &before, &native.dsn, &output_path);
++    let manifest_text = serde_json::to_string_pretty(&manifest)?;
++    let output_for_write = output_path.clone();
++    let manifest_for_write = manifest_output_path.clone();
++    let dsn_for_write = native.dsn.clone();
++    task::spawn_blocking(move || {
++        write_specctra_export_pair(
++            &output_for_write,
++            &dsn_for_write,
++            &manifest_for_write,
++            &manifest_text,
++        )
++    })
++    .await
++    .map_err(|error| anyhow::anyhow!("Specctra output writer panicked: {error}"))??;
++
++    let custom_rules = board_path.with_extension("kicad_dru");
++    let mut notes = Vec::new();
++    if custom_rules.is_file() {
++        notes.push(format!(
++            "custom DRC rules in {} are not part of a Specctra DSN; run DRC after importing the session",
++            custom_rules.display()
++        ));
++    }
++    Ok(CallToolResult::text(
++        json!({
++            "success": true,
++            "method": "kicad10_native_actionplugin",
++            "native_bridge_pid": native.plugin_pid,
++            "native_bridge_protocol_version": native.protocol_version,
++            "native_bridge_diagnostics": attempt.diagnostics,
++            "board": board_path,
++            "output": output_path,
++            "dsn_bytes": native.dsn.len(),
++            "manifest_output_path": manifest_output_path,
++            "source_sha256": manifest.source_sha256,
++            "notes": notes,
++            "next": "route_specctra_dsn, then import_specctra_ses_native with this manifest"
++        })
++        .to_string(),
++    ))
++}
++
+ fn resolve_native_bridge_mode(args: &serde_json::Value) -> &str {
+     args["native_bridge_mode"].as_str().unwrap_or("disable")
+ }
+diff --git a/crates/konnect-core/src/tools/pcb_routing.rs b/crates/konnect-core/src/tools/pcb_routing.rs
+index 3b49e6f..f65018c 100644
+--- a/crates/konnect-core/src/tools/pcb_routing.rs
++++ b/crates/konnect-core/src/tools/pcb_routing.rs
+@@ -145,6 +145,27 @@ pub fn tools() -> Vec<ToolDef> {
+             |args, ctx| async move { handle_apply_specctra_ses(args, ctx).await }
+         )
+         .with_board_access(crate::tools::BoardAccess::LiveOnly),
++        tool!(
++            "import_specctra_ses_native",
++            "Apply a Freerouting SES to the live board with KiCad's own session importer (the \
++             PCB Editor's File > Import > Specctra Session) through the authenticated KiCad 10 \
++             ActionPlugin bridge. Pairs with export_specctra_dsn_native: the manifest must bind \
++             the same board, and the live board must still be byte-identical to the exported \
++             revision, otherwise nothing is imported. KiCad replaces the board's existing tracks \
++             and vias with the session's; the board is left modified and unsaved (save_project, \
++             then DRC).",
++            json!({
++                "type": "object",
++                "properties": {
++                    "board": { "type": "string", "description": "Open .kicad_pcb the DSN was exported from" },
++                    "ses_path": { "type": "string", "description": "Freerouting .ses result; must be readable by KiCad at the same absolute path" },
++                    "manifest_path": { "type": "string", "description": "Manifest written by export_specctra_dsn_native" }
++                },
++                "required": ["board", "ses_path", "manifest_path"]
++            }),
++            |args, ctx| async move { handle_import_specctra_ses_native(args, ctx).await }
++        )
++        .with_board_access(crate::tools::BoardAccess::LiveOnly),
+         tool!(
+             "add_copper_pour",
+             "Alias of pcb_board's add_zone, kept for compatibility: identical arguments, \
+@@ -730,6 +751,126 @@ fn created_route_item_ids(items: &[prost_types::Any]) -> anyhow::Result<Vec<Stri
+     Ok(ids)
+ }
+ 
++async fn handle_import_specctra_ses_native(
++    args: &serde_json::Value,
++    ctx: &ToolContext,
++) -> anyhow::Result<CallToolResult> {
++    let board = get_path(args, "board")?;
++    let ses_path = get_path(args, "ses_path")?;
++    let manifest_path = get_path(args, "manifest_path")?;
++    if !extension_is(&board, "kicad_pcb") {
++        return Ok(invalid_specctra_argument(
++            "board",
++            "must have the .kicad_pcb extension",
++        ));
++    }
++    if !extension_is(&ses_path, "ses") {
++        return Ok(invalid_specctra_argument(
++            "ses_path",
++            "must have the .ses extension",
++        ));
++    }
++    let board = board
++        .canonicalize()
++        .with_context(|| format!("resolve board {}", board.display()))?;
++    let ses_path = ses_path
++        .canonicalize()
++        .with_context(|| format!("resolve SES {}", ses_path.display()))?;
++    let ses_size = tokio::fs::metadata(&ses_path)
++        .await
++        .with_context(|| format!("inspect SES {}", ses_path.display()))?
++        .len();
++    if ses_size == 0 || ses_size > crate::native_specctra::MAX_SES_BYTES {
++        return Ok(invalid_specctra_argument(
++            "ses_path",
++            &format!("SES size {ses_size} is outside the supported range"),
++        ));
++    }
++    let ses_source = tokio::fs::read_to_string(&ses_path)
++        .await
++        .with_context(|| format!("read SES {}", ses_path.display()))?;
++    let stats = match crate::native_specctra::inspect_ses(&ses_source) {
++        Ok(stats) => stats,
++        Err(error) => return Ok(invalid_specctra_argument("ses_path", &format!("{error:#}"))),
++    };
++    let manifest_source = tokio::fs::read_to_string(&manifest_path)
++        .await
++        .with_context(|| format!("read manifest {}", manifest_path.display()))?;
++    let manifest = match crate::native_specctra::parse_manifest(&manifest_source, &board) {
++        Ok(manifest) => manifest,
++        Err(error) => {
++            return Ok(invalid_specctra_argument(
++                "manifest_path",
++                &format!("{error:#}"),
++            ))
++        }
++    };
++
++    let snapshot = |board: std::path::PathBuf, addr: String| async move {
++        crate::tools::with_ipc(addr, move |client| {
++            let document = client.find_open_board(&board)?;
++            client.save_document_to_string_in(document)
++        })
++        .await
++    };
++    let before = match snapshot(board.clone(), ctx.config.ipc_address.clone()).await? {
++        Ok(before) => before,
++        Err(reason) => {
++            return Ok(CallToolResult::error(format!(
++                "KiCad must be running with the board loaded (IPC error: {reason})"
++            )))
++        }
++    };
++    let live_sha256 = crate::native_specctra::sha256_hex(before.as_bytes());
++    if live_sha256 != manifest.source_sha256 {
++        return Ok(CallToolResult::error_kind(
++            ToolErrorKind::Conflict {
++                paths: vec![board.display().to_string()],
++            },
++            format!(
++                "live board revision {live_sha256} is not the exported revision {}; \
++                 the session was routed for a different board state. Re-export the DSN and route again.",
++                manifest.source_sha256
++            ),
++        ));
++    }
++
++    let attempt = crate::native_specctra_bridge::try_import_ses(&board, &ses_path).await;
++    let Some(import) = attempt.import else {
++        return Ok(CallToolResult::error(format!(
++            "KiCad-native Specctra session import did not run: {}",
++            attempt.diagnostics.join("; ")
++        )));
++    };
++    let after = match snapshot(board.clone(), ctx.config.ipc_address.clone()).await? {
++        Ok(after) => after,
++        Err(reason) => {
++            return Ok(CallToolResult::error(format!(
++                "session imported but the board could not be re-read over IPC: {reason}"
++            )))
++        }
++    };
++    Ok(CallToolResult::text(
++        json!({
++            "success": true,
++            "method": "kicad10_native_actionplugin",
++            "native_bridge_pid": import.plugin_pid,
++            "native_bridge_protocol_version": import.protocol_version,
++            "native_bridge_diagnostics": attempt.diagnostics,
++            "board": board,
++            "ses_path": ses_path,
++            "session": { "wires": stats.wires, "vias": stats.vias },
++            "board_before": { "tracks": import.tracks_before, "vias": import.vias_before },
++            "board_after": { "tracks": import.tracks_after, "vias": import.vias_after },
++            "source_sha256": manifest.source_sha256,
++            "result_sha256": crate::native_specctra::sha256_hex(after.as_bytes()),
++            "saved": false,
++            "next": "save_project, then run DRC (kicad-cli pcb drc --schematic-parity)"
++        })
++        .to_string(),
++    ))
++}
++
+ async fn handle_apply_specctra_ses(
+     args: &serde_json::Value,
+     ctx: &ToolContext,
+diff --git a/docs/TROUBLESHOOTING.md b/docs/TROUBLESHOOTING.md
+index ebbef8c..9bee844 100644
+--- a/docs/TROUBLESHOOTING.md
++++ b/docs/TROUBLESHOOTING.md
+@@ -398,7 +398,7 @@ callable tools, the fix is to make the *first* listing complete:
+ ```
+ 
+ in `konnect.toml` in the working directory, or a `settings.json` beside the binary. Every toolset is then loaded at
+-startup, so `tools/list` carries all 233 tools from the first call.
++startup, so `tools/list` carries all 235 tools from the first call.
+ 
+ It is off by default because it costs what the router exists to save: roughly
+ 25K tokens per listing instead of ~2K. Turn it on only if your client needs it.
+diff --git a/packaging/metadata.json b/packaging/metadata.json
+index 88b6fa7..4e5f2d1 100644
+--- a/packaging/metadata.json
++++ b/packaging/metadata.json
+@@ -1,7 +1,7 @@
+ {
+   "$schema": "https://go.kicad.org/pcm/schemas/v1",
+   "name": "Konnect",
+-  "description": "AI-assisted PCB design via the Model Context Protocol. Enables Claude and other AI assistants to design schematics and PCBs with 226 tools organized into on-demand toolsets.",
++  "description": "AI-assisted PCB design via the Model Context Protocol. Enables Claude and other AI assistants to design schematics and PCBs with 228 tools organized into on-demand toolsets.",
+   "description_full": "Konnect exposes a complete set of KiCAD design tools to AI assistants via the Model Context Protocol (MCP). It supports schematic editing, PCB layout, local Freerouting MCP routing, library management, JLCPCB part search, ERC/DRC, design review audits, and full export pipelines. Tools are organized into 21 toolsets loaded on demand so the AI only sees relevant tools at once.",
+   "identifier": "com.github.mixelpixx.konnect",
+   "type": "plugin",
+diff --git a/plugin/native_bridge.py b/plugin/native_bridge.py
+index 01da2aa..78b7efe 100644
+--- a/plugin/native_bridge.py
++++ b/plugin/native_bridge.py
+@@ -1,9 +1,11 @@
+ """Authenticated KiCad 10 native-operation bridge for Konnect.
+ 
+ This module is loaded only by the legacy ``pcbnew.ActionPlugin``.  It exposes
+-one deliberately narrow operation to the external Rust server: ask KiCad's
+-own SWIG binding to export the active board as Specctra DSN.  It is not a
+-general Python execution service and is not the KiCad 11 integration path.
++two deliberately narrow operations to the external Rust server: ask KiCad's
++own SWIG binding to export the active board as Specctra DSN, and ask the PCB
++Editor to import a Specctra session (SES) into the active board -- the same
++code path as File > Import > Specctra Session.  It is not a general Python
++execution service and is not the KiCad 11 integration path.
+ """
+ 
+ import json
+@@ -20,7 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ PROTOCOL_VERSION = 1
+ MAX_REQUEST_BYTES = 16 * 1024
+ MAX_DSN_BYTES = 512 * 1024 * 1024
++MAX_SES_BYTES = 512 * 1024 * 1024
+ UI_TIMEOUT_SECONDS = 30
++IMPORT_UI_TIMEOUT_SECONDS = 120
+ 
+ 
+ def bridge_root():
+@@ -114,7 +118,7 @@ class _BridgeRequestHandler(BaseHTTPRequestHandler):
+     def do_POST(self):
+         if not self._require_auth():
+             return
+-        if self.path != "/v1/export-specctra-dsn":
++        if self.path not in ("/v1/export-specctra-dsn", "/v1/import-specctra-ses"):
+             self._json(404, {"success": False, "error": "unknown operation"})
+             return
+         try:
+@@ -130,7 +134,13 @@ class _BridgeRequestHandler(BaseHTTPRequestHandler):
+             expected_board = request["expected_board"]
+             if not isinstance(expected_board, str) or not expected_board:
+                 raise ValueError("expected_board must be a non-empty string")
+-            result = self.server.bridge.export_specctra_dsn(expected_board)
++            if self.path == "/v1/import-specctra-ses":
++                ses_path = request["ses_path"]
++                if not isinstance(ses_path, str) or not ses_path:
++                    raise ValueError("ses_path must be a non-empty string")
++                result = self.server.bridge.import_specctra_ses(expected_board, ses_path)
++            else:
++                result = self.server.bridge.export_specctra_dsn(expected_board)
+         except (KeyError, ValueError, json.JSONDecodeError) as error:
+             self._json(400, {"success": False, "error": str(error)})
+             return
+@@ -161,6 +171,9 @@ class NativeSpecctraBridge:
+     def available(self):
+         return callable(getattr(self.pcbnew, "ExportSpecctraDSN", None))
+ 
++    def import_available(self):
++        return callable(getattr(self.pcbnew, "ImportSpecctraSES", None))
++
+     def running(self):
+         return self.server is not None and self.thread is not None and self.thread.is_alive()
+ 
+@@ -281,3 +294,91 @@ class NativeSpecctraBridge:
+         if "error" in result:
+             raise RuntimeError(result["error"])
+         return result
++
++    def _routing_counts(self, board):
++        """Count tracks (segments and arcs) and vias on ``board``."""
++        via_type = getattr(self.pcbnew, "PCB_VIA", None)
++        tracks = 0
++        vias = 0
++        for item in board.GetTracks():
++            if via_type is not None and isinstance(item, via_type):
++                vias += 1
++            else:
++                tracks += 1
++        return tracks, vias
++
++    def import_specctra_ses(self, expected_board, ses_path):
++        """Import a Specctra session into the active board through the PCB Editor.
++
++        The board is modified in memory only; saving stays the caller's
++        decision (KiCad IPC save or the user).  KiCad's own importer replaces
++        the board's existing tracks and vias with the session's wiring.
++        """
++        if not self.running():
++            raise RuntimeError("native bridge is not running")
++        if not self.import_available():
++            raise RuntimeError("this KiCad build has no pcbnew.ImportSpecctraSES")
++        if not os.path.isabs(ses_path):
++            raise ValueError("ses_path must be absolute")
++        if not ses_path.lower().endswith(".ses"):
++            raise ValueError("ses_path must have the .ses extension")
++        if not os.path.isfile(ses_path):
++            raise ValueError(f"SES file '{ses_path}' does not exist")
++        size = os.path.getsize(ses_path)
++        if size <= 0 or size > MAX_SES_BYTES:
++            raise ValueError(f"SES size {size} is outside the supported range")
++        if not self.operation_lock.acquire(blocking=False):
++            raise RuntimeError("native bridge is busy with another operation")
++        completed = threading.Event()
++        result = {}
++
++        def run_on_ui_thread():
++            try:
++                board = self.pcbnew.GetBoard()
++                board_path = board.GetFileName() if board is not None else ""
++                if not board_path:
++                    raise RuntimeError("PCB Editor has no saved active board")
++                if _canonical(board_path) != _canonical(expected_board):
++                    raise RuntimeError(
++                        f"active KiCad board '{board_path}' does not match requested board '{expected_board}'"
++                    )
++                tracks_before, vias_before = self._routing_counts(board)
++                try:
++                    ok = self.pcbnew.ImportSpecctraSES(ses_path)
++                except TypeError:
++                    ok = self.pcbnew.ImportSpecctraSES(board, ses_path)
++                if not ok:
++                    raise RuntimeError("KiCad native Specctra session import failed")
++                board = self.pcbnew.GetBoard()
++                tracks_after, vias_after = self._routing_counts(board)
++                refresh = getattr(self.pcbnew, "Refresh", None)
++                if callable(refresh):
++                    refresh()
++                result.update(
++                    success=True,
++                    protocol_version=PROTOCOL_VERSION,
++                    pid=os.getpid(),
++                    board_path=board_path,
++                    ses_path=ses_path,
++                    ses_bytes=size,
++                    tracks_before=tracks_before,
++                    vias_before=vias_before,
++                    tracks_after=tracks_after,
++                    vias_after=vias_after,
++                )
++            except Exception as error:
++                result["error"] = str(error)
++            finally:
++                completed.set()
++                self.operation_lock.release()
++
++        try:
++            self.wx.CallAfter(run_on_ui_thread)
++        except Exception:
++            self.operation_lock.release()
++            raise
++        if not completed.wait(IMPORT_UI_TIMEOUT_SECONDS):
++            raise RuntimeError("KiCad UI thread did not complete native Specctra session import")
++        if "error" in result:
++            raise RuntimeError(result["error"])
++        return result
+diff --git a/plugin/plugin.json b/plugin/plugin.json
+index df2cedc..97d39c0 100644
+--- a/plugin/plugin.json
++++ b/plugin/plugin.json
+@@ -1,7 +1,7 @@
+ {
+   "identifier": "com.github.mixelpixx.konnect",
+   "name": "Konnect",
+-  "description": "AI-assisted PCB design via the Model Context Protocol. 226 tools for schematic editing, PCB layout, routing, design review, and manufacturing export.",
++  "description": "AI-assisted PCB design via the Model Context Protocol. 228 tools for schematic editing, PCB layout, routing, design review, and manufacturing export.",
+   "runtime": {
+     "type": "exec"
+   },
+diff --git a/plugin/tests/test_native_bridge.py b/plugin/tests/test_native_bridge.py
+index 0de57e9..874145e 100644
+--- a/plugin/tests/test_native_bridge.py
++++ b/plugin/tests/test_native_bridge.py
+@@ -19,21 +19,46 @@ native_bridge = importlib.util.module_from_spec(_SPEC)
+ _SPEC.loader.exec_module(native_bridge)
+ 
+ 
++class _Track:
++    pass
++
++
++class _Via(_Track):
++    pass
++
++
+ class _Board:
+     def __init__(self, path):
+         self.path = path
++        self.tracks = [_Track()]
+ 
+     def GetFileName(self):
+         return self.path
+ 
++    def GetTracks(self):
++        return list(self.tracks)
++
+ 
+ class _Pcbnew:
++    PCB_VIA = _Via
++
+     def __init__(self, board_path):
+         self.board = _Board(board_path)
++        self.imported = []
++        self.refreshed = 0
+ 
+     def GetBoard(self):
+         return self.board
+ 
++    def ImportSpecctraSES(self, path):
++        # KiCad's importer replaces existing wiring with the session's.
++        self.imported.append(path)
++        self.board.tracks = [_Track(), _Track(), _Via()]
++        return True
++
++    def Refresh(self):
++        self.refreshed += 1
++
+     @staticmethod
+     def ExportSpecctraDSN(output):
+         with open(output, "w", encoding="utf-8") as stream:
+@@ -116,6 +141,54 @@ class NativeBridgeTests(unittest.TestCase):
+             )
+         self.assertEqual(caught.exception.code, 409)
+ 
++    def _ses(self, name="routed.ses"):
++        path = os.path.join(self.temp.name, name)
++        with open(path, "w", encoding="utf-8") as stream:
++            stream.write("(session routed (routes))\n")
++        return path
++
++    def test_import_runs_kicad_importer_on_the_active_board(self):
++        ses = self._ses()
++        status, payload = _request(
++            self.registration,
++            "/v1/import-specctra-ses",
++            {"expected_board": self.board, "ses_path": ses},
++        )
++        self.assertEqual(status, 200)
++        self.assertTrue(payload["success"])
++        self.assertEqual(self.bridge.pcbnew.imported, [ses])
++        self.assertEqual(self.bridge.pcbnew.refreshed, 1)
++        self.assertEqual((payload["tracks_before"], payload["vias_before"]), (1, 0))
++        self.assertEqual((payload["tracks_after"], payload["vias_after"]), (2, 1))
++        self.assertEqual(os.path.realpath(payload["board_path"]), os.path.realpath(self.board))
++
++    def test_import_refuses_a_different_board(self):
++        with self.assertRaises(urllib.error.HTTPError) as caught:
++            _request(
++                self.registration,
++                "/v1/import-specctra-ses",
++                {
++                    "expected_board": os.path.join(self.temp.name, "other.kicad_pcb"),
++                    "ses_path": self._ses(),
++                },
++            )
++        self.assertEqual(caught.exception.code, 409)
++        self.assertEqual(self.bridge.pcbnew.imported, [])
++
++    def test_import_refuses_unsafe_session_paths(self):
++        relative = "routed.ses"
++        missing = os.path.join(self.temp.name, "missing.ses")
++        wrong_extension = self._ses("routed.txt")
++        for ses_path in (relative, missing, wrong_extension):
++            with self.assertRaises(urllib.error.HTTPError) as caught:
++                _request(
++                    self.registration,
++                    "/v1/import-specctra-ses",
++                    {"expected_board": self.board, "ses_path": ses_path},
++                )
++            self.assertIn(caught.exception.code, (400, 409), ses_path)
++        self.assertEqual(self.bridge.pcbnew.imported, [])
++
+     def test_stop_removes_registration_and_session_artifacts(self):
+         registration = self.bridge.registration_path
+         session = self.bridge.session_dir
+diff --git a/tool-directory.md b/tool-directory.md
+index 6b4c704..c9cb824 100644
+--- a/tool-directory.md
++++ b/tool-directory.md
+@@ -13,7 +13,7 @@ Compatibility notes for removed or narrowed arguments are recorded in
+ ## Overview
+ 
+ - **21 toolsets** organized into 10 categories
+-- **226 registered tools** + **7 always-visible meta-tools** = **233 total**
++- **228 registered tools** + **7 always-visible meta-tools** = **235 total**
+ - **Discovery pattern**: the server pre-loads only the **starter kit** (`project`, `config`) so baseline `tools/list` costs ~2K tokens instead of ~23K. The LLM reads `list_toolboxes` → calls `load_toolset(name)` to expose additional tools on demand; `unload_toolset(name)` prunes them. `tools/list_changed` is notified on every mutation. If the LLM calls a tool whose toolset isn't loaded, the error names the owning toolset so recovery is a single `load_toolset` hop. `load_toolset` also accepts an array of names to load several toolsets with a single `tools/list` refresh.
+ - **Observability**: every `tools/call` is recorded — ring buffer of the last 100 calls + per-tool counters + JSONL at `<konnect dir>/logs/calls.jsonl`. The LLM self-diagnoses via `get_recent_calls` and `server_stats`.
+ 
+@@ -277,7 +277,7 @@ and Windows servers do not.
+ | `duplicate_component` | Duplicate an existing footprint at a new position via KiCAD IPC. |
+ | `get_board_2d_view` | Render the board with kicad-cli and return a base64 PNG. This is the 3-D render viewed from the top, not a layer plot, and takes no layer selection — use `export_svg` for layer-aware output. |
+ 
+-### `pcb_routing` · 15 tools
++### `pcb_routing` · 16 tools
+ **Purpose:** Traces, vias, copper pours, net classes, differential pairs, and strict Specctra SES import.
+ **Source:** [`crates/konnect-core/src/tools/pcb_routing.rs`](crates/konnect-core/src/tools/pcb_routing.rs)
+ 
+@@ -289,6 +289,7 @@ and Windows servers do not.
+ | `add_via` | Add a through-hole via at a position and assign it to a net via IPC. |
+ | `plan_specctra_ses_import` | Strictly validate a Freerouting SES against its revision-bound manifest and the exact live board, returning every planned route item and the preserved locked-track/via inventory without mutation. |
+ | `apply_specctra_ses` | Preserve the manifest-bound locked straight tracks and through vias, apply a validated SES through KiCad IPC as one undo transaction, verify post-commit IPC read-back, create a separate candidate board, and report direct KiCad DRC evidence (including whether it is clean). |
++| `import_specctra_ses_native` | Apply a Freerouting SES with KiCad's own session importer (File > Import > Specctra Session) through the authenticated KiCad 10 ActionPlugin bridge. Requires the manifest from `export_specctra_dsn_native` and refuses unless the live board is byte-identical to the exported revision; leaves the board modified and unsaved. |
+ | `add_copper_pour` | Alias of `add_zone`, kept for compatibility: same arguments, same defaults, same IPC-first behaviour. (Its `min_width` default was 0.25 and is now 0.2, matching `add_zone` and KiCad.) |
+ | `delete_trace` | Delete one observed trace segment by UUID via KiCad IPC. Refuses non-trace or stale UUIDs before deletion, targets the requested board, and reports the observed preimage only after readback proves the segment is absent. |
+ | `query_traces` | List trace segments on the board, optionally filtered by net and/or layer. |
+@@ -313,7 +314,7 @@ and Windows servers do not.
+ 
+ ---
+ 
+-### `pcb_export` · 14 tools
++### `pcb_export` · 15 tools
+ **Purpose:** Gerber, PDF, SVG, 3D model, BOM, revision-bound Specctra DSN, pick-and-place, DRC, DXF/GenCAD/IPC-2581/ODB++.
+ **Source:** [`crates/konnect-core/src/tools/pcb_export.rs`](crates/konnect-core/src/tools/pcb_export.rs)
+ 
+@@ -326,6 +327,7 @@ and Windows servers do not.
+ | `export_bom` | Generate KiCad 10's CSV Bill of Materials from schematic fields. |
+ | `export_netlist` | Export the PCB netlist in KiCAD or IPC-D-356 format. |
+ | `export_specctra_dsn` | Export a deterministic, revision-bound Specctra DSN plus reverse manifest from a supported live KiCad board. The Rust exporter is the default. On KiCad 10, explicitly set `native_bridge_mode` to `prefer` or `require` for the optional authenticated ActionPlugin native exporter. Preserves locked straight tracks and through vias as fixed wiring; refuses unlocked routing, arcs, unsupported geometry, or incomplete rules. |
++| `export_specctra_dsn_native` | Export a DSN written by KiCad itself (File > Export > Specctra DSN) through the authenticated KiCad 10 ActionPlugin bridge, for boards outside the Rust exporter's profile (rounded-rectangle/oval pads, NPTH holes, arc outlines). Writes a manifest binding the DSN to the SHA-256 of the live board revision for `import_specctra_ses_native`. |
+ | `export_position_file` | Generate a component placement (pick-and-place) position file for SMT assembly. |
+ | `export_dxf` | Export the PCB to DXF, one file per requested layer, using kicad-cli. `layers` is required — there is no all-layers default. For mechanical CAD interchange. |
+ | `export_gencad` | Export the PCB in GenCAD format using kicad-cli. |
+@@ -383,7 +385,7 @@ and Windows servers do not.
+ | `route_specctra_dsn` | Route a DSN through the discovered local Freerouting JAR's native headless MCP server and create a new SES without cloud upload or replacement. The owned unauthenticated service is loopback-only; its child is reaped on every exit path. |
+ 
+ Migration from the former `autoroute` tool: use `export_specctra_dsn`,
+-`route_specctra_dsn`, then `plan_specctra_ses_import` / `apply_specctra_ses`.
++`route_specctra_dsn`, then `plan_specctra_ses_import` / `apply_specctra_ses`. For boards outside that profile, use `export_specctra_dsn_native` → `route_specctra_dsn` → `import_specctra_ses_native` (KiCad 10 ActionPlugin bridge).
+ Konnect delegates routing to Freerouting's native MCP server instead of duplicating
+ the router or relying on the KiCad ActionPlugin workflow.
+ 
