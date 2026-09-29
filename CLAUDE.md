@@ -51,7 +51,7 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
   `save_project` で保存してから DRC を `kicad-cli` で回す(DRC はファイルを読む)
 - ユーザーが GUI で同時に編集していると競合する。PCB 編集の前に一声かける
 - ファイルを手で書き換えて IPC の代わりにしない
-- 既知の癖(Konnect 0.12.1, route-test / route-test-smd で確認):
+- 既知の癖(Konnect 0.12.1 / KiCad 10.0.6、2026-09 の自動配線通し検証で確認):
   - `get_board_extents` は IPC 経由だと図形だけの基板を空(0)と返す。保存後はファイル経由で正しい値になる
   - `update_pcb_from_schematic` で追加したフットプリントは `(attr smd)` / descr / tags などが欠ける。
     反映後に必ず `update_footprints_from_library` を当てる。SMD 抵抗はそれでも
