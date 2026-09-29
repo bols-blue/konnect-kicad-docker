@@ -81,18 +81,34 @@ micro HDMI 映像出力を持つ。
 
 | 部品 | シンボル | フットプリント | 対応 |
 | --- | --- | --- | --- |
-| CM4/CM5 本体 | 無し | DF40C-100DS-0.4V あり | 自作シンボル(100 ピン ×2、CM4/CM5 共通の信号名)が必要 |
+| CM4/CM5 本体 | 標準には無し → **公式 IO Board の KiCad データに `ComputeModule5-CM5` / `ComputeModule4-CM4` あり** | 公式データに `Raspberry-Pi-5-Compute-Module` / `-4-` あり(2 コネクタ一体、204 パッド) | 公式データを流用(§7.1) |
 | USB2514B | `USB2514B_Bi` | (QFN36、標準品) | 流用 |
-| Mini PCIe ソケット | `Bus_PCI_Express_Mini` | **カード側のエッジのみ**(ソケット無し) | ソケットのフットプリントは自作 |
+| Mini PCIe ソケット | `Bus_PCI_Express_Mini` | `Connector_PCBEdge:BUS_PCI_Express_Mini_Full`(基板側ソケット、PCIe Mini CEM 仕様準拠の汎用品。SMD 54 + 位置決め穴 2) | 流用。**採用するソケットのデータシートとパッド寸法を照合すること** |
 | SIM | `SIM_Card` 系 | nanoSIM(GCT SIM8060 / CUI NSIM-2-C)、JAE SF72S006 | 流用 |
 | micro HDMI | 汎用 HDMI シンボル(Type D 専用は無し) | Molex 46765-1xxx / 2xxx | 流用(ピン割り当ては要確認) |
-| HDMI ESD | `TPD4E05U06DQA` あり(TPD12S016 は無し) | 標準品 | TPD4E05U06 ×2 + 5V ロードスイッチの構成に変更可 |
-| RJ45 | 複数あり(Würth、Abracon ほか) | 複数あり | ギガビット対応品から選ぶ |
+| HDMI ESD | `TPD4EUSB30`(標準・公式データの両方にあり)。TPD12S016 は無し | 標準品 | **公式 CM4/CM5 IO Board と同じ TPD4EUSB30 ×3 に変更** |
+| RJ45 | 公式データに `MagJack-A70-112-331N126` | 公式データに `TRJG0926HENL` | 公式 IO Board と同じ MagJack を流用 |
 | JST XA | (汎用 Conn_01x08) | B08B-XASK-1、B04B 系 | 流用 |
 | microSD | `Micro_SD_Card_Det*` | Hirose DM3、Molex 104031 ほか | 流用 |
 | Type-C(USB 2.0) | `USB_C_Receptacle_USB2.0_16P` | 標準品 | 流用 |
 | Type-C 接続検出 | `TUSB320` | 標準品 | 採用候補 |
 | USB ESD / ポート電源 | `USBLC6-2SC6` / `TPS2051CDBV` | 標準品 | 流用 |
+
+### 7.1 ダウンロード元(2026-09-29 に取得・中身確認済み)
+
+| データ | URL | 形式 | ライセンス |
+| --- | --- | --- | --- |
+| CM5 IO Board rev2 KiCad | https://pip.raspberrypi.com/categories/1098-design-files | KiCad 9(README に記載) | 明記なし(3D モデルは各メーカーの規約に従う) |
+| CM4 IO Board KiCad | https://pip.raspberrypi.com/categories/1210-design-files | KiCad 6 | 同上 |
+| (参考)Mini PCIe コミュニティ版 | https://github.com/mithro/kicad-mini-pci-express | KiCad 4(2018) | Apache-2.0 → 標準品があるので不採用 |
+
+- CM4 と CM5 のフットプリントは、パッド数(204)と Y 座標が同じで、X 座標だけ ±0.04 mm 違う
+  (CM5 はコネクタのメーカーが変わったため)。**CM5 のものを採用**する。
+- CM4 と CM5 のシンボルは、ピン番号は同じで、ピン名が 48 本違う(16/19/76/92/94/96/99/100/102/104/106/111 と、
+  カメラ / DSI / USB3 のピン群)。**CM5 のシンボルを採用し、違いのあるピンは本設計では使わない**
+  (§3 の方針と一致)。
+- USB2514B ハブと FSUSB42 まわりの参考回路は、公式 CM4 IO Board の `USB2-HUB.kicad_sch` にある。
+- ライセンスが明記されていないので、評価以外に使う前に Raspberry Pi に確認すること。
 
 ## 8. 未決事項
 
