@@ -3,8 +3,9 @@
 Konnect(KiCad 用 MCP サーバ)と KiCad 10 の CLI を 1 イメージに同梱し、
 Claude Code から **回路図生成 → ERC → 製造ファイル出力** まで回すための検証環境。
 
-PCB のインタラクティブ編集(部品配置・配線)は KiCad の GUI プロセスを必要とする
-ため、この環境には含まれない。そこは割り切る構成。
+PCB のインタラクティブ編集(部品配置・配線)は KiCad の GUI プロセスを必要とする。
+ローカルのデスクトップ環境では `make gui` で同じイメージの KiCad GUI を X11 転送で
+起動し、その IPC ソケットを Konnect と共有することで PCB 系ツールも使える。
 
 ## 前提
 
@@ -42,6 +43,7 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 ├── scripts/
 │   ├── konnect-mcp.sh      MCP stdio 起動ラッパー
 │   ├── kicad-cli.sh        ホストから kicad-cli を叩くラッパー
+│   ├── kicad-gui.sh        KiCad GUI を X11 転送で起動 (PCB系ツール用)
 │   └── smoke-test.sh       疎通確認
 └── projects/               作業領域。コンテナの /work にマウントされる
 ```
@@ -69,10 +71,26 @@ HOME で起動するため、これが無いとシンボル解決に失敗して
 
 ## 事前に把握しておくべき制約
 
-**PCB レイアウトはできない。** Konnect の PCB 編集は KiCad 10 の IPC API
-(NNG + protobuf)経由で、KiCad が対象基板を開いた状態で動いている必要がある。
-GUI を Docker で動かすのはサポート外なので、この環境では配置・配線・ゾーンは
-一切触れない。回路図と ERC まで作って、あとはホストの KiCad に引き継ぐ。
+**PCB 系ツールは GUI 起動中のみ。** Konnect の PCB 編集は KiCad 10 の IPC API
+(NNG + protobuf)経由で、KiCad が対象基板を PCB エディタで開いた状態で
+動いている必要がある。
+
+```bash
+make gui PROJECT=/work/demo/demo.kicad_pro   # KiCad が X11 (Wayland なら XWayland) で開く
+# → プロジェクトマネージャで PCB エディタを開く
+make gui-stop
+```
+
+- IPC ソケットはホストの `./.kicad-ipc` を GUI / Konnect 両コンテナの
+  `/tmp/kicad` にマウントして共有する。Konnect には `KICAD_API_SOCKET` で固定パスを渡す
+  (Konnect のソケット自動検出は起動時に一度だけなので、GUI を後から起動しても繋がるように)
+- GUI の設定は `./.kicad-gui-config` に永続化する。初回だけセットアップウィザードが出る
+  (完了するまで IPC サーバが起動しない)
+- 公式イメージの GUI 利用はサポート外。フォント・IME・OpenGL で問題が出る可能性がある
+- 動作確認済み: 基板情報・レイヤ一覧の読み取り、外形追加、保存(KiCad 10.0.6)。
+  フットプリント配置・配線は未検証。Freerouting は Java が無いので不可
+- ヘッドレス環境(SSH 先など)ではこの経路は使えない。回路図と ERC まで作って、
+  あとはホストの KiCad に引き継ぐ
 
 **Konnect は beta。** コアのツールチェーンは動作確認済みだが若いリリースで、
 実地での検証を求めている段階。回路図ファイルを直接書き換えるので、必ず git 管理下の
@@ -107,7 +125,8 @@ make build KICAD_TAG=10.0.5 KONNECT_REF=<タグ or コミットSHA>
 | Claude Code が konnect を認識しない | `claude mcp list` で状態を確認。`.mcp.json` の相対パスはプロジェクトルート基準。ダメなら `scripts/konnect-mcp.sh` を絶対パスに書き換える |
 | `image not found` | `make build` 未実行、または `KONNECT_IMAGE` の値が `.mcp.json` と不一致 |
 | ERC でシンボルが軒並み見つからない | `make smoke` の項目 2 を確認。`sym-lib-table=NO` なら Dockerfile の `KICAD_CONFIG_VER` を実際の設定ディレクトリ名に合わせる |
-| `IPC connect failed` | PCB 系ツール。この環境では実行不可(仕様) |
+| `IPC connect failed` | KiCad GUI 未起動、または PCB エディタで対象基板を開いていない。`make gui` |
+| `make gui` で IPC ソケットが現れない | 初回ウィザードやダイアログで止まっていないか確認。`KONNECT_GUI_DEBUG=1 make gui` で前面実行 |
 | Rust ビルドが OOM で落ちる | Docker Desktop のメモリ割り当てを 8 GB 以上に |
 
 ## 参考

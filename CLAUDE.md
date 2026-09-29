@@ -27,17 +27,29 @@ Konnect のツールに渡してもコンテナからは見えない。
 | ERC | **可** | `kicad-cli` がイメージに入っている |
 | DRC | **可** | 同上。ただし対象の `.kicad_pcb` が既に存在する場合のみ |
 | Gerber / ドリル / BOM / PDF / STEP 出力 | **可** | `kicad-cli` 経由 |
-| PCB のフットプリント配置・移動・回転 | **不可** | KiCad 10 の IPC API 経由で、GUI が起動している必要がある |
-| 配線(トラック/ビア/ゾーン)の編集 | **不可** | 同上 |
-| Freerouting による自動配線 | **不可** | PCB編集に依存 |
+| PCB の基板情報・レイヤ・外形の読み書き | **可(GUI 起動時)** | IPC 経由。`get_board_info` / `get_layer_list` / `add_board_outline` / `save_project` で動作確認済み |
+| PCB のフットプリント配置・移動・回転 | **可(GUI 起動時)・未検証** | 同じ IPC 経路だが個別には未確認 |
+| 配線(トラック/ビア/ゾーン)の編集 | **可(GUI 起動時)・未検証** | 同上 |
+| Freerouting による自動配線 | **不可** | イメージに Java / Freerouting が入っていない |
 | ライブ回路図ビューア | **不可** | システム WebView 依存でコンテナでは動かない |
 
-### PCB系ツールを呼んだ場合
+### PCB系ツール(IPC)の前提
 
-`IPC connect failed` 等のエラーが返る。**この場合はリトライしないこと。**
-別のパラメータを試したり、ファイルを手で書き換えて回避しようとしたりせず、
-作業を中断してユーザーに「この操作はコンテナ環境では実行できない」と報告する。
-PCB レイアウトが必要なら、生成物をホストの KiCad 10 で開いて人間が行う。
+PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージを X11 転送で
+ホストに表示)の IPC ソケットに繋がる。**対象基板が GUI の PCB エディタで
+開かれているときだけ動く。**
+
+- 作業前に `open_project`(`path` に `.kicad_pcb`)で `ipc_available: true` かつ
+  `requested_open: true` を確認する
+- `ipc_available: false` / `IPC connect failed` なら **リトライせず**、ユーザーに
+  `make gui PROJECT=/work/<name>/<name>.kicad_pro` で起動して PCB エディタを
+  開くよう依頼する。GUI の起動・操作は人間が行う
+- IPC での変更は GUI 上の未保存状態。`save_project` で保存してから DRC を
+  `kicad-cli` で回す(DRC はファイルを読む)
+- ユーザーが GUI で同時に編集していると競合する。PCB 編集の前に一声かける
+- ファイルを手で書き換えて IPC の代わりにしない
+- 既知の癖: `get_board_extents` は IPC 経由だと図形だけの基板を空(0)と返す。
+  保存後はファイル経由で正しい値になる
 
 ## 作業ルール
 
@@ -77,7 +89,8 @@ PCB レイアウトが必要なら、生成物をホストの KiCad 10 で開い
 5. ERC 実行 → 違反を潰す → ERC が通るまで 4-5 を反復
 6. 結果をユーザーに提示(何を作ったか、ERCの結果、未解決の懸念)
 7. 必要なら回路図PDF / BOM を出力
-8. PCB が必要な場合はここで停止し、ホストの KiCad に引き継ぐ
+8. PCB が必要な場合: ユーザーに `make gui` で PCB エディタを開いてもらい、
+   IPC 経由で編集 → `save_project` → DRC。GUI が無ければここで停止して引き継ぐ
 ```
 
 各サイクルの終わりに、次の 3 点を必ず報告する。
@@ -94,6 +107,8 @@ PCB レイアウトが必要なら、生成物をホストの KiCad 10 で開い
 make build        # イメージのビルド(Rust のフルビルドを含むので初回は長い)
 make smoke        # kicad-cli / ライブラリ / MCP ハンドシェイクの確認
 make shell        # コンテナ内のシェル
+make gui PROJECT=/work/demo/demo.kicad_pro   # KiCad GUI (PCB系ツール用)
+make gui-stop
 ```
 
 `kicad-cli` をホストから直接叩く(パスはコンテナ側 `/work/...`):
@@ -130,7 +145,8 @@ scripts/kicad-cli.sh pcb export drill   --output /work/demo/fab/ /work/demo/demo
 
 | 症状 | 対処 |
 | --- | --- |
-| `IPC connect failed` | PCB系ツール。この環境では実行不可。中断して報告する |
+| `IPC connect failed` / `ipc_available: false` | KiCad GUI 未起動か PCB エディタ未オープン。リトライせずユーザーに `make gui` を依頼 |
+| `make gui` で IPC ソケットが現れない | ダイアログで止まっていないか確認。設定は `./.kicad-gui-config` に永続化される |
 | シンボルが見つからない / ERC が大量に落ちる | グローバル `sym-lib-table` が見えているか `make smoke` で確認 |
 | ホストに root 所有のファイルができる | ラッパースクリプト経由で起動しているか確認(`--user` を付けている) |
 | ツールが見つからない | 一覧を取り直す。ファイル直接編集で回避しない |
