@@ -10,3 +10,7 @@ projects/**/fp-info-cache
 
 # OS
 .DS_Store
+
+# KiCad IPC ソケット (scripts/kicad-gui.sh)
+.kicad-ipc/
+.kicad-gui-config/

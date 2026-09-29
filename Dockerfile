@@ -4,7 +4,8 @@
 #
 # 構成B: 回路図編集(S式直接編集) + ERC/DRC + 製造ファイル出力までを
 #        コンテナ内で完結させる。PCBのインタラクティブ編集(IPC API)は
-#        GUIプロセスが必要なため、この環境では利用できない。
+#        GUIプロセスが必要なので、scripts/kicad-gui.sh で同じイメージの
+#        KiCad GUI を X11 転送で起動し、IPC ソケットを Konnect と共有する。
 #
 # ランタイムは KiCad 公式イメージ。公式イメージは kicad-cli 利用を
 # 想定したもので、GUI 用途はサポート対象外。
@@ -70,6 +71,7 @@ ENV KICAD10_SYMBOL_DIR=/usr/share/kicad/symbols \
 # コンテナは任意の UID (--user $(id -u)) で起動するので HOME は 0777。
 # 新規 HOME には sym-lib-table / fp-lib-table が無く、これが無いと
 # シンボル解決が効かず ERC が通らないので、テンプレートから配置しておく。
+# kicad_common.json は IPC API サーバ有効化のみ(他の項目は KiCad が既定値で補う)。
 ARG KICAD_CONFIG_VER=10.0
 ENV HOME=/konnect-home \
     XDG_CONFIG_HOME=/konnect-home/.config \
@@ -86,6 +88,7 @@ RUN set -eux; \
             echo "!! template/$f not found - symbol/footprint resolution may fail"; \
         fi; \
     done; \
+    printf '{\n  "api": {\n    "enable_server": true\n  }\n}\n' > "$d/kicad_common.json"; \
     chmod -R 0777 /konnect-home
 
 # 作業ディレクトリ = ホストの ./projects をマウントする場所
