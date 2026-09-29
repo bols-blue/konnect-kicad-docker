@@ -4938,14 +4938,6 @@
 		(uuid "4090a62d-c13b-48fe-bc18-4c0413c86f1b")
 	)
 	(no_connect
-		(at 119.38 210.82)
-		(uuid "0718e96d-1d0e-4eca-85b0-e30fda96876f")
-	)
-	(no_connect
-		(at 180.34 213.36)
-		(uuid "bdf11b66-d4ff-4cfa-b10c-e9d203151bfd")
-	)
-	(no_connect
 		(at 119.38 213.36)
 		(uuid "23a5d1ad-da84-454d-b5c0-a1489f002083")
 	)
@@ -5261,6 +5253,14 @@
 		(at 330.2 269.24)
 		(uuid "ec20c5db-ecb0-48bf-99f4-280f3c0c6a96")
 	)
+	(no_connect
+		(at 119.38 190.5)
+		(uuid "e8a8f174-5f06-4a1d-8bfa-1a6bec915284")
+	)
+	(no_connect
+		(at 180.34 200.66)
+		(uuid "629be694-cd15-4ad1-b269-d4f0274c6e0e")
+	)
 	(wire
 		(pts
 			(xy 119.38 276.86)
@@ -5529,20 +5529,6 @@
 	)
 	(wire
 		(pts
-			(xy 119.38 190.5)
-			(xy 116.84 190.5)
-		)
-		(uuid "14a62069-6163-4ff6-b92a-c258583e63fd")
-	)
-	(wire
-		(pts
-			(xy 180.34 200.66)
-			(xy 182.88 200.66)
-		)
-		(uuid "288deb9c-f120-4716-82b3-be4643a89d54")
-	)
-	(wire
-		(pts
 			(xy 180.34 190.5)
 			(xy 182.88 190.5)
 		)
@@ -5638,6 +5624,20 @@
 			(xy 116.84 279.4)
 		)
 		(uuid "18b9216c-ac74-489d-b4e4-ad4229f703c0")
+	)
+	(wire
+		(pts
+			(xy 119.38 210.82)
+			(xy 116.84 210.82)
+		)
+		(uuid "10bc3fc0-1996-4f8f-9d9f-8484b9785b62")
+	)
+	(wire
+		(pts
+			(xy 180.34 213.36)
+			(xy 182.88 213.36)
+		)
+		(uuid "350311a1-1470-4ee2-8cc3-094cf52f59ed")
 	)
 	(label "GND"
 		(at 180.34 154.94 0)
@@ -6711,28 +6711,6 @@
 		)
 		(uuid "82e7c418-6706-4afc-b69f-02a2a081d6e3")
 	)
-	(global_label "LTE_RESET_N"
-		(shape input)
-		(at 116.84 190.5 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "a22536c2-d2c9-4c6b-860e-5e21f28e6ffb")
-	)
-	(global_label "LTE_W_DISABLE_N"
-		(shape input)
-		(at 182.88 200.66 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "b966fc5e-9b2d-4b8a-9794-66cd88390649")
-	)
 	(global_label "LTE_3V3_PG"
 		(shape input)
 		(at 182.88 190.5 0)
@@ -6754,6 +6732,28 @@
 			(justify right)
 		)
 		(uuid "12ea58cf-84e6-4d9e-ae48-43aa9c31b359")
+	)
+	(global_label "LTE_RESET"
+		(shape input)
+		(at 116.84 210.82 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "74b15c71-ca96-4ba2-9c3a-c91e1002e4f5")
+	)
+	(global_label "LTE_AIRPLANE"
+		(shape input)
+		(at 182.88 213.36 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "68ccad81-3a78-4735-9e06-f714bcdab6b9")
 	)
 	(symbol
 		(lib_id "CM5IO:ComputeModule5-CM5")
