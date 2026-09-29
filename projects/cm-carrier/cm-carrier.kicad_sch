@@ -6,4 +6,39 @@
 	(paper "A4")
 	(lib_symbols
 	)
+  (sheet
+    (at 30 30)
+    (size 40 25)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (fields_autoplaced yes)
+    (stroke (width 0.1524) (type solid))
+    (fill (color 0 0 0 0.0))
+    (uuid "4132ee7f-bd7f-4fd3-8c73-13406c44a4ab")
+    (property "Sheetname" "Power"
+      (at 30 29.365 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left bottom))
+    )
+    (property "Sheetfile" "power.kicad_sch"
+      (at 30 55.635 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects (font (size 1.27 1.27)) (justify left top))
+    )
+    (instances
+      (project "cm-carrier"
+        (path "/a976657b-65a0-4cc4-bafb-6280c56b6145" (page "2"))
+      )
+    )
+  )
+  (sheet_instances
+    (path "/"
+      (page "1")
+    )
+  )
+  (embedded_fonts no)
 )
