@@ -44,7 +44,7 @@ micro HDMI 映像出力を持つ。
 | 電源用 XA | 8 ピン(5V ×4 / GND ×4)。例: B08B-XASK-1 | §6 の計算 | 中(型番は要確認) |
 | Ethernet | 1000BASE-T 対応のトランス内蔵 RJ45(LED 付き) | PHY はモジュール内蔵。型番は CT 接続の要求を確認して確定 | 中 |
 | micro HDMI | Type D レセプタクル + TMDS 用 ESD アレイ + HDMI 5V 用ロードスイッチ(または TPD12S016 系) | CM5 は ESD 保護を削除済み | 中 |
-| LTE | Quectel EC25-J Mini PCIe + Mini PCIe ソケット + SIM ソケット + 3.3V 専用 DC-DC | §5 | 中(電源電流は要確認) |
+| LTE | Quectel EC25-J Mini PCIe + Mini PCIe ソケット + SIM ソケット + **5V→3.3V 降圧 DC-DC(定格 3 A 以上)+ 低 ESR 470 µF 以上** | §6.1 | 高 |
 | microSD | Push-push microSD ソケット + SD 電源用ロードスイッチ(SD_PWR_ON(75)で制御、プルアップで既定 ON) | CM5 datasheet 2.7「SD cards require a power switch controlled by SD_PWR_ON」。SD_VDD_OVERRIDE(73)は未接続(3.3V 信号の SD カード) | 高 |
 
 ## 5. LTE モジュール比較
@@ -68,14 +68,26 @@ micro HDMI 映像出力を持つ。
 | --- | --- | --- |
 | CM5(CM4 はこれより小さい) | 2.5 A | CM5 datasheet 付録 B.3「5 V at up to 2.5 A」 |
 | 外部 USB ×3 | 1.5 A | USB 2.0 の既定値 500 mA × 3 |
-| LTE | 約 1.5 A | 3.3 V × 2 A(ピーク、**未確認**)÷ 5 V ÷ 効率 0.9 |
+| LTE | 約 2.0 A(設計値)/ 実測の目安 約 0.8 A | 設計値: 3.3 V × 2.7 A ÷ 5 V ÷ 効率 0.9。目安: 3.3 V × 1.07 A ÷ 5 V ÷ 0.9(§6.1) |
 | ハブ / HDMI 5V / その他 | 約 0.25 A | HDMI 5V は 55 mA |
-| **合計(ピーク)** | **約 5.7 A** | |
+| **合計(ピーク、設計値)** | **約 6.25 A** | |
 
 - XA の端子 SXA-001T-P0.6 の定格は 3 A、電線は AWG 22〜28。
-- 複数極を同時に通電するので、1 極あたり 2 A に減定格して計算: 5.7 A ÷ 2 A ≈ 2.9 → 最低 3 極。
-  **5V 4 極 + GND 4 極 の 8 ピン**で余裕を持たせる。
-- 電圧降下(AWG22 = 約 53 mΩ/m、30 cm、4 本並列): 往復で約 45 mV。
+- 複数極を同時に通電するので、1 極あたり 2 A に減定格して計算: 6.25 A ÷ 2 A ≈ 3.1 → 最低 4 極。
+  **5V 4 極 + GND 4 極 の 8 ピン**(許容 8 A)で変更なし。
+- 電圧降下(AWG22 = 約 53 mΩ/m、30 cm、4 本並列、6.25 A): 往復で約 50 mV。
+
+### 6.1 LTE の 3.3V 電源(根拠: Quectel EC25 Series Mini PCIe Hardware Design V2.6, 2023-08-25)
+
+- **USB 接続でも 3.3V 電源は必須。** Mini PCIe 版の電源入力は VCC_3V3(ピン 2 / 39 / 41 / 52、3.0〜3.6 V)だけで、
+  USB の VBUS ピンは無い。USB はデータ線(USB_DM = 36、USB_DP = 38)だけ。
+- ガイドの要求: 「In the 2G network, the input peak current may reach 2.7 A … the power supply must be able to
+  provide a rated output current of 2.7 A at least, and a bypass capacitor (C3) of no less than 470 µF with low ESR」
+- EC25-J は 2G(GSM)非対応(LTE B1/3/8/18/19/26/41、WCDMA B1/6/8/19)。Table 44 の最大値は LTE-FDD B3 @ 23.29 dBm で **1070 mA(Typ.)**。
+  ただしこれは平均値なので、ガイドの要求どおり **定格 2.7 A 以上で設計する**。
+- ガイドの参考回路は LDO だが、5 V → 3.3 V を 2.7 A で落とすと約 4.6 W の損失になるので **降圧 DC-DC を採用**する。
+  ガイドの指示どおり、DC-DC とその配線はアンテナから離す。
+- CM の 3.3V 出力(最大 600 mA、CM5 datasheet 3.4)からは供給できない。
 
 ## 7. KiCad 10 標準ライブラリの有無(konnect-kicad:10 イメージで確認)
 
@@ -116,5 +128,5 @@ micro HDMI 映像出力を持つ。
 - [x] ストレージ → Lite 版 + microSD、rpiboot 経路なし
 - [ ] EC25-J の認証で使われたアンテナ型番(Quectel / 代理店に問い合わせ)
 - [ ] CM5 で PD ネゴシエーションが無いときの USB 電流制限の扱い(EEPROM 設定で済むか)
-- [ ] LTE の 3.3V 電源の電流値(Quectel の Mini PCIe 版 HW 設計ガイド)
+- [x] LTE の 3.3V 電源 → 定格 2.7 A 以上 + 470 µF(§6.1)
 - [ ] 基板外形・取付穴・部品高さの制約
