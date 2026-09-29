@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "konnect": {
+      "command": "bash",
+      "args": ["scripts/konnect-mcp.sh"],
+      "env": {
+        "KONNECT_IMAGE": "konnect-kicad:10"
+      }
+    }
+  }
+}

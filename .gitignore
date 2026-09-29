@@ -1,0 +1,12 @@
+# 生成物
+projects/**/fab/
+projects/**/*.rpt
+projects/**/*.pdf
+projects/**/*.step
+projects/**/*.net
+projects/**/*-backups/
+projects/**/*.kicad_prl
+projects/**/fp-info-cache
+
+# OS
+.DS_Store

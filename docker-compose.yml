@@ -1,0 +1,26 @@
+# Claude Code から使う MCP サーバは stdio (scripts/konnect-mcp.sh) が本命。
+# こちらは補助で、バッチ処理や CI 相当の確認を回すためのワークベンチ。
+#
+#   docker compose build
+#   docker compose run --rm cli kicad-cli version
+#   docker compose run --rm cli kicad-cli sch erc --output /work/demo/erc.rpt /work/demo/demo.kicad_sch
+#
+# 上流の Konnect は HTTP トランスポート (Streamable HTTP) も持つが、
+# 認証が無く、ツールがファイルを編集し kicad-cli を実行するため、
+# この構成では意図的に公開していない。必要になったら loopback 限定で
+# 公開し、認証付きリバースプロキシを前段に置くこと。
+
+services:
+  cli:
+    build:
+      context: .
+      args:
+        KICAD_TAG: "${KICAD_TAG:-10.0}"
+        KONNECT_REF: "${KONNECT_REF:-main}"
+    image: konnect-kicad:10
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work
+    volumes:
+      - ./projects:/work
+    entrypoint: [""]
+    command: ["bash"]
