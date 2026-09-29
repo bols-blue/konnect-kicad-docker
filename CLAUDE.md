@@ -115,7 +115,8 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
 ビルドと疎通確認:
 
 ```bash
-make build        # イメージのビルド(Rust のフルビルドを含むので初回は長い)
+make pull         # 公開イメージ (ghcr.io/bols-blue/konnect-kicad:10) を取得
+make build        # イメージをローカルでビルド(Rust のフルビルドを含むので初回は長い)
 make smoke        # kicad-cli / ライブラリ / MCP ハンドシェイクの確認
 make shell        # コンテナ内のシェル
 make gui PROJECT=/work/demo/demo.kicad_pro   # KiCad GUI (PCB系ツール用)

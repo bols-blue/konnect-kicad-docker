@@ -1,5 +1,7 @@
 # konnect-kicad-docker
 
+[![image](https://github.com/bols-blue/konnect-kicad-docker/actions/workflows/image.yml/badge.svg)](https://github.com/bols-blue/konnect-kicad-docker/actions/workflows/image.yml)
+
 Konnect(KiCad 用 MCP サーバ)と KiCad 10 の CLI を 1 イメージに同梱し、
 Claude Code から **回路図生成 → ERC → 製造ファイル出力** まで回すための検証環境。
 
@@ -9,16 +11,24 @@ PCB のインタラクティブ編集(部品配置・配線)は KiCad の GUI �
 
 ## 前提
 
-- Docker(Compose v2 同梱のもの)
-- ディスク空き 10 GB 程度(KiCad 公式イメージ + Rust ビルドキャッシュ)
+- Docker(Compose v2 同梱のもの)、Linux x86_64(KiCad 公式イメージが amd64 のみ)
+- ディスク空き 3 GB 程度(公開イメージを使う場合)/ 10 GB 程度(自前ビルドの場合)
 - Claude Code
 
 ## セットアップ
 
+公開イメージを使う(推奨):
+
 ```bash
-chmod +x scripts/*.sh
-make build     # 初回は Rust のフルビルドを含むため時間がかかる
+make pull      # ghcr.io/bols-blue/konnect-kicad:10 を取得し konnect-kicad:10 としてタグ付け
 make smoke     # 疎通確認
+```
+
+自前でビルドする:
+
+```bash
+make build     # 初回は Rust のフルビルドを含むため時間がかかる
+make smoke
 ```
 
 `make smoke` が全項目 OK になったら、このディレクトリで Claude Code を起動する。
@@ -37,7 +47,8 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 .
 ├── Dockerfile              KiCad 公式イメージ + Konnect ビルド + Freerouting/Java
 ├── docker-compose.yml      バッチ用ワークベンチ(任意)
-├── Makefile                build / smoke / shell
+├── Makefile                pull / build / smoke / shell / gui
+├── .github/workflows/      イメージのビルド・smoke test・GHCR 公開
 ├── .mcp.json               Claude Code 用 MCP 設定
 ├── CLAUDE.md               Claude Code への作業指示(可否の線引き・ルール・手順)
 ├── scripts/
@@ -59,7 +70,8 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 
 **Konnect はソースからビルドしている。** 配布バイナリは Windows / macOS 向けで、
 Linux は公式にはロードマップ段階(コード自体は 3 プラットフォームで CI を通過)。
-ビルダーステージをランタイムと同じ Debian bookworm 系に揃えて glibc 不一致を避けている。
+ビルダーはランタイム (Debian 13 trixie) より古い bookworm にして、新しい glibc 上で
+そのまま動くバイナリにしている。
 
 **グローバル `sym-lib-table` をイメージに焼いてある。** コンテナは毎回まっさらな
 HOME で起動するため、これが無いとシンボル解決に失敗して ERC が通らない。
@@ -87,8 +99,10 @@ make gui-stop
 - GUI の設定は `./.kicad-gui-config` に永続化する。初回だけセットアップウィザードが出る
   (完了するまで IPC サーバが起動しない)
 - 公式イメージの GUI 利用はサポート外。フォント・IME・OpenGL で問題が出る可能性がある
-- 動作確認済み: 基板情報・レイヤ一覧の読み取り、外形追加、保存(KiCad 10.0.6)。
-  フットプリント配置・配線は未検証
+- 動作確認済み: 回路図 → PCB 反映、フットプリント配置、外形追加、保存、
+  DSN 出力 → Freerouting → SES 取り込み → DRC の通し(THT 部品の基板)。
+  SMD 受動部品 (roundrect パッド) は Konnect が DSN 出力を拒否するので、
+  DSN 出力と SES 取り込みは GUI で人が行う。詳細は `CLAUDE.md` の可否表
 - 自動配線は Freerouting 2.3.0(SHA-256 検証済み)+ OpenJDK 25 をイメージに同梱。
   Konnect が headless MCP モードで起動し、DSN → SES をローカルで処理する。
   起動時に GitHub へ新版チェックの通信が出る(`KONNECT_NETWORK=none` なら出ないが部品検索も止まる)
@@ -99,7 +113,7 @@ make gui-stop
 実地での検証を求めている段階。回路図ファイルを直接書き換えるので、必ず git 管理下の
 コピーに対して使うこと。実案件のディレクトリを `./projects` にマウントしない。
 
-**ライセンスは AGPL-3.0。** ホビイスト・学生・フリーランス・OSS は自由に使える一方、
+**Konnect のライセンスは AGPL-3.0。** ホビイスト・学生・フリーランス・OSS は自由に使える一方、
 企業の場合は Konnect の上や周辺に作ったものが、ネットワーク越しに提供する
 ソフトウェアも含めて同ライセンスでのオープンソース化を要求される。商用ライセンスも
 別途用意されている。個人の評価で閉じるなら問題にならないが、社内共有や業務利用に
@@ -110,16 +124,54 @@ make gui-stop
 公開している。この構成では stdio のみにしている。必要になったら認証付きの
 リバースプロキシを前段に置き、`0.0.0.0` に素で公開しないこと。
 
-## バージョン固定
+## バージョン
 
-再現性が要るなら以下を固定する。
+中身のバージョンは Dockerfile の `ARG` 既定値で固定している(動作検証済みの組み合わせ)。
+
+| 部品 | バージョン | 定義 |
+| --- | --- | --- |
+| KiCad | 10.0.6 | `KICAD_TAG` |
+| Konnect | `9d582b6` (0.12.1) | `KONNECT_REF`(ブランチ・タグ・SHA いずれも可) |
+| Freerouting | 2.3.0 | `FREEROUTING_VERSION` / `FREEROUTING_SHA256` |
+| OpenJDK | 25 (Debian パッケージ) | Dockerfile |
+
+別の組み合わせを試す場合:
 
 ```bash
-make build KICAD_TAG=10.0.5 KONNECT_REF=<タグ or コミットSHA>
-# Freerouting を上げる場合は Dockerfile の FREEROUTING_VERSION / FREEROUTING_SHA256 を両方更新
+make build KICAD_TAG=10.0.7 KONNECT_REF=<タグ or コミットSHA>
+make smoke
 ```
 
-ビルド済みイメージのバージョンは `make versions` で確認できる。
+検証できたら Dockerfile の既定値を更新して main に push すると、GitHub Actions が
+smoke test を通したうえで GHCR に公開する。ビルド済みイメージのバージョンは
+`make versions` で確認できる。
+
+## 公開イメージ
+
+`ghcr.io/bols-blue/konnect-kicad` に以下のタグで公開している
+(`.github/workflows/image.yml`)。
+
+| タグ | 内容 |
+| --- | --- |
+| `10` | main の最新 |
+| `kicad<ver>-konnect<sha7>` | 中身のバージョンで固定したい場合 |
+| `sha-<sha7>` | このリポジトリのコミット |
+| `v*` | リリースタグ |
+
+## 同梱ソフトウェアのライセンスとソース
+
+イメージは以下を再配布している。いずれもソースは上流で公開されており、
+同梱したバージョンは上の表とイメージのラベル(`docker inspect`)で特定できる。
+
+| 部品 | ライセンス | ソース |
+| --- | --- | --- |
+| Konnect | AGPL-3.0-only | https://github.com/mixelpixx/Konnect (該当コミットは `/etc/konnect-commit.txt`) |
+| KiCad | GPL-3.0-or-later | https://gitlab.com/kicad/code/kicad (ベースイメージ `kicad/kicad`) |
+| Freerouting | GPL-3.0 | https://github.com/freerouting/freerouting |
+| OpenJDK | GPL-2.0 with Classpath Exception | Debian パッケージ `openjdk-25-jre-headless` |
+| Debian ベースの各パッケージ | 各パッケージによる | `apt-get source` で取得可 |
+
+このリポジトリ自体(Dockerfile・スクリプト・ドキュメント)には上記のコードは含まれない。
 
 ## トラブルシュート
 
@@ -127,7 +179,7 @@ make build KICAD_TAG=10.0.5 KONNECT_REF=<タグ or コミットSHA>
 | --- | --- |
 | `make build` がライブラリ検証で落ちる | KiCad イメージのディレクトリ構成が変わっている。エラー出力の `ls` 結果を見て Dockerfile のパスを修正 |
 | Claude Code が konnect を認識しない | `claude mcp list` で状態を確認。`.mcp.json` の相対パスはプロジェクトルート基準。ダメなら `scripts/konnect-mcp.sh` を絶対パスに書き換える |
-| `image not found` | `make build` 未実行、または `KONNECT_IMAGE` の値が `.mcp.json` と不一致 |
+| `image not found` | `make pull` / `make build` 未実行、または `KONNECT_IMAGE` の値が `.mcp.json` と不一致 |
 | ERC でシンボルが軒並み見つからない | `make smoke` の項目 2 を確認。`sym-lib-table=NO` なら Dockerfile の `KICAD_CONFIG_VER` を実際の設定ディレクトリ名に合わせる |
 | `IPC connect failed` | KiCad GUI 未起動、または PCB エディタで対象基板を開いていない。`make gui` |
 | `make gui` で IPC ソケットが現れない | 初回ウィザードやダイアログで止まっていないか確認。`KONNECT_GUI_DEBUG=1 make gui` で前面実行 |

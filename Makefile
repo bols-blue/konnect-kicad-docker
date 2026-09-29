@@ -1,15 +1,20 @@
 IMAGE       ?= konnect-kicad:10
-KICAD_TAG   ?= 10.0
-KONNECT_REF ?= main
+# KICAD_TAG / KONNECT_REF は未指定なら Dockerfile の既定値 (検証済みの固定版) を使う
+KICAD_TAG   ?=
+KONNECT_REF ?=
+GHCR_IMAGE  ?= ghcr.io/bols-blue/konnect-kicad:10
+BUILD_ARGS   = $(if $(KICAD_TAG),--build-arg KICAD_TAG=$(KICAD_TAG)) \
+               $(if $(KONNECT_REF),--build-arg KONNECT_REF=$(KONNECT_REF))
 PROJECTS    ?= $(CURDIR)/projects
 
 export KONNECT_IMAGE    = $(IMAGE)
 export KONNECT_PROJECTS = $(PROJECTS)
 
-.PHONY: help build rebuild smoke shell gui gui-stop cli versions clean
+.PHONY: help build rebuild pull smoke shell gui gui-stop cli versions clean
 
 help:
-	@echo "make build     イメージをビルド (KICAD_TAG=$(KICAD_TAG) KONNECT_REF=$(KONNECT_REF))"
+	@echo "make pull      公開イメージ $(GHCR_IMAGE) を取得して $(IMAGE) としてタグ付け"
+	@echo "make build     イメージをローカルでビルド (KICAD_TAG= KONNECT_REF= で上書き可)"
 	@echo "make rebuild   キャッシュを使わず再ビルド"
 	@echo "make smoke     疎通確認 (kicad-cli / ライブラリ / MCP ハンドシェイク)"
 	@echo "make shell     コンテナ内シェル"
@@ -19,16 +24,14 @@ help:
 	@echo "make clean     イメージを削除"
 
 build:
-	docker build \
-		--build-arg KICAD_TAG=$(KICAD_TAG) \
-		--build-arg KONNECT_REF=$(KONNECT_REF) \
-		-t $(IMAGE) .
+	docker build $(BUILD_ARGS) -t $(IMAGE) .
 
 rebuild:
-	docker build --no-cache --pull \
-		--build-arg KICAD_TAG=$(KICAD_TAG) \
-		--build-arg KONNECT_REF=$(KONNECT_REF) \
-		-t $(IMAGE) .
+	docker build --no-cache --pull $(BUILD_ARGS) -t $(IMAGE) .
+
+pull:
+	docker pull $(GHCR_IMAGE)
+	docker tag $(GHCR_IMAGE) $(IMAGE)
 
 smoke:
 	@chmod +x scripts/*.sh

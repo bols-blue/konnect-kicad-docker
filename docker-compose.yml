@@ -12,11 +12,9 @@
 
 services:
   cli:
+    # バージョンは Dockerfile の ARG 既定値 (検証済みの固定版) に従う
     build:
       context: .
-      args:
-        KICAD_TAG: "${KICAD_TAG:-10.0}"
-        KONNECT_REF: "${KONNECT_REF:-main}"
     image: konnect-kicad:10
     user: "${UID:-1000}:${GID:-1000}"
     working_dir: /work

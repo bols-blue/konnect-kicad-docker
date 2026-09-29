@@ -10,18 +10,21 @@
 # ランタイムは KiCad 公式イメージ。公式イメージは kicad-cli 利用を
 # 想定したもので、GUI 用途はサポート対象外。
 
-ARG KICAD_TAG=10.0
+# 既定値は動作検証済みの組み合わせ (make smoke / 自動配線の通し検証)。
+# 上げる場合は Makefile 経由で KICAD_TAG= / KONNECT_REF= を渡して検証してから変える。
+ARG KICAD_TAG=10.0.6
 
 ###############################################################################
 # Stage 1: Konnect をソースからビルド
 #   - 公式リリースは Windows/macOS 向けバイナリなので Linux は自前ビルド
-#   - ランタイムと同じ Debian bookworm 系で揃えて glibc 不一致を避ける
+#   - ランタイム (KiCad 10.0.6 = Debian 13 trixie) より古い bookworm でビルドし、
+#     新しい glibc 上でそのまま動くようにする
 ###############################################################################
 FROM rust:1-bookworm AS builder
 
 ARG KONNECT_REPO=https://github.com/mixelpixx/Konnect.git
-# 再現性のためタグやコミットSHAを指定することを推奨 (例: v0.3.0)
-ARG KONNECT_REF=main
+# ブランチ・タグ・コミット SHA のいずれも可。既定は検証済みの 0.12.1 相当の main
+ARG KONNECT_REF=9d582b6560f6c476dafae025f7991792c7f70d31
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         protobuf-compiler \
@@ -34,7 +37,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-RUN git clone --depth 1 --branch "${KONNECT_REF}" "${KONNECT_REPO}" . \
+# clone --branch は SHA を受け付けないので fetch で取る (GitHub は SHA 直指定の fetch 可)
+RUN git init -q . \
+    && git remote add origin "${KONNECT_REPO}" \
+    && git fetch -q --depth 1 origin "${KONNECT_REF}" \
+    && git checkout -q FETCH_HEAD \
     && git rev-parse HEAD > /konnect-commit.txt
 
 # schematic-viewer は別ワークスペース かつ system webview 依存のためビルドしない

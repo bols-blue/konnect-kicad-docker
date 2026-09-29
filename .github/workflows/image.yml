@@ -1,0 +1,99 @@
+# konnect-kicad イメージをビルドし、smoke test が通ったら GHCR に公開する。
+#
+#   ghcr.io/<owner>/konnect-kicad:10                       最新 (main)
+#   ghcr.io/<owner>/konnect-kicad:kicad<ver>-konnect<sha7>  中身のバージョンで固定
+#   ghcr.io/<owner>/konnect-kicad:sha-<sha7>               このリポジトリのコミット
+#   ghcr.io/<owner>/konnect-kicad:<tag>                    v* タグ push 時
+#
+# バージョンは Dockerfile の ARG 既定値が唯一の定義元。ここでは読み取るだけ。
+name: image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - scripts/**
+      - .github/workflows/image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # KiCad 公式イメージが amd64 のみなので amd64 のみ
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned versions from Dockerfile
+        id: ver
+        run: |
+          arg() { sed -n "s/^ARG $1=//p" Dockerfile | head -1; }
+          kicad="$(arg KICAD_TAG)"
+          konnect="$(arg KONNECT_REF)"
+          freerouting="$(arg FREEROUTING_VERSION)"
+          test -n "$kicad" && test -n "$konnect" && test -n "$freerouting"
+          {
+            echo "kicad=$kicad"
+            echo "konnect=$konnect"
+            echo "konnect7=${konnect:0:7}"
+            echo "freerouting=$freerouting"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build for test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: konnect-kicad:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        env:
+          KONNECT_IMAGE: konnect-kicad:ci
+        run: bash scripts/smoke-test.sh
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/konnect-kicad
+          tags: |
+            type=raw,value=10,enable={{is_default_branch}}
+            type=raw,value=kicad${{ steps.ver.outputs.kicad }}-konnect${{ steps.ver.outputs.konnect7 }},enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=ref,event=tag
+          labels: |
+            org.opencontainers.image.title=konnect-kicad
+            org.opencontainers.image.description=Konnect (KiCad MCP server) + KiCad ${{ steps.ver.outputs.kicad }} + Freerouting ${{ steps.ver.outputs.freerouting }}
+            io.github.konnect.commit=${{ steps.ver.outputs.konnect }}
+            io.github.konnect.source=https://github.com/mixelpixx/Konnect/tree/${{ steps.ver.outputs.konnect }}
+            org.kicad.version=${{ steps.ver.outputs.kicad }}
+            org.freerouting.version=${{ steps.ver.outputs.freerouting }}
+
+      # 同じ入力なので上の Build for test のキャッシュがそのまま効く
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
