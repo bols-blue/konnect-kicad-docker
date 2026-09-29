@@ -28,10 +28,12 @@ Konnect のツールに渡してもコンテナからは見えない。
 | DRC | **可** | 同上。ただし対象の `.kicad_pcb` が既に存在する場合のみ |
 | Gerber / ドリル / BOM / PDF / STEP 出力 | **可** | `kicad-cli` 経由 |
 | PCB の基板情報・レイヤ・外形の読み書き | **可(GUI 起動時)** | IPC 経由。`get_board_info` / `get_layer_list` / `add_board_outline` / `save_project` で動作確認済み |
-| PCB のフットプリント配置・移動・回転 | **可(GUI 起動時)・未検証** | 同じ IPC 経路だが個別には未確認 |
-| 配線(トラック/ビア/ゾーン)の編集 | **可(GUI 起動時)・未検証** | 同上 |
-| Freerouting による自動配線(DSN → SES) | **可** | Freerouting 2.3.0 + OpenJDK 25 を同梱。`check_freerouting` / `route_specctra_dsn` で動作確認済み |
-| 自動配線結果の基板への取り込み(SES インポート) | **可(GUI 起動時)・未検証** | PCB 編集なので IPC 経由 |
+| 回路図 → PCB 反映 | **可(GUI 起動時)** | `update_pcb_from_schematic`(dry run → apply)。フットプリント種別の変更は競合になるので、基板側を `delete_component` してから再反映する |
+| PCB のフットプリント配置・移動・回転 | **可(GUI 起動時)** | `set_component_placements` で確認済み |
+| 自動配線: DSN 出力 | **条件付き** | `export_specctra_dsn` はパッド形状 circle / rect のみ。**標準の SMD 受動部品 (roundrect) は拒否される** → GUI の ファイル > エクスポート > Specctra DSN を人間が使う |
+| 自動配線: Freerouting (DSN → SES) | **可** | `route_specctra_dsn`。KiCad 本体が出力した DSN も可 |
+| 自動配線: SES 取り込み | **条件付き** | `plan_specctra_ses_import` → `apply_specctra_ses` は Konnect 自身が出力した DSN(+ manifest)にのみ使える。GUI で出力した DSN の場合は GUI の ファイル > インポート > Specctra Session を人間が使う |
+| 配線の個別編集(トラック/ビア/ゾーン) | **可(GUI 起動時)・未検証** | 同じ IPC 経路。ビアを削除するツールは無い |
 | ライブ回路図ビューア | **不可** | システム WebView 依存でコンテナでは動かない |
 
 ### PCB系ツール(IPC)の前提
@@ -49,8 +51,18 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
   `kicad-cli` で回す(DRC はファイルを読む)
 - ユーザーが GUI で同時に編集していると競合する。PCB 編集の前に一声かける
 - ファイルを手で書き換えて IPC の代わりにしない
-- 既知の癖: `get_board_extents` は IPC 経由だと図形だけの基板を空(0)と返す。
-  保存後はファイル経由で正しい値になる
+- 既知の癖(Konnect 0.12.1, route-test / route-test-smd で確認):
+  - `get_board_extents` は IPC 経由だと図形だけの基板を空(0)と返す。保存後はファイル経由で正しい値になる
+  - `update_pcb_from_schematic` で追加したフットプリントは `(attr smd)` / descr / tags などが欠ける。
+    反映後に必ず `update_footprints_from_library` を当てる。SMD 抵抗はそれでも
+    `lib_footprint_mismatch` 警告が残る(パッド寸法 1 nm の丸め)
+  - `update_pcb_from_schematic` は回路図の Description を基板に反映しない。
+    `kicad-cli pcb drc --schematic-parity` で `footprint_symbol_field_mismatch` になる。
+    Konnect の DRC はこれを報告しないので、parity 付きの kicad-cli DRC を必ず回す
+  - Freerouting は未使用ビアを残すことがある(`via_dangling`)。GUI の
+    ツール > 配線とビアをクリーンアップ で消す
+  - GUI での SES 取り込み後、保存を依頼したがファイルに反映されていないことがあった(原因未特定)。取り込み後はファイルの
+    更新時刻か segment 数で保存を確かめ、未保存なら `save_project` で保存する
 
 ## 作業ルール
 
