@@ -5446,7 +5446,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "5ad6d075-e4c8-45eb-87d1-4a69a00fb086")
-		(property "Reference" "#PWR01"
+		(property "Reference" "#PWR053"
 			(at 177.8 181.61 0)
 			(hide yes)
 			(effects
@@ -5493,7 +5493,7 @@
 		(instances
 			(project "cm-carrier"
 				(path "/a976657b-65a0-4cc4-bafb-6280c56b6145/c46edb0f-11ef-47ad-bbfa-6088b83221cf"
-					(reference "#PWR01")
+					(reference "#PWR053")
 					(unit 1)
 				)
 			)
