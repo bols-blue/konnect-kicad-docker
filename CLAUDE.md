@@ -47,8 +47,8 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
 - `ipc_available: false` / `IPC connect failed` なら **リトライせず**、ユーザーに
   `make gui PROJECT=/work/<name>/<name>.kicad_pro` で起動して PCB エディタを
   開くよう依頼する。GUI の起動・操作は人間が行う
-- IPC での変更は GUI 上の未保存状態。`save_project` で保存してから DRC を
-  `kicad-cli` で回す(DRC はファイルを読む)
+- IPC での変更や GUI での操作は、保存するまでファイルに反映されない。
+  `save_project` で保存してから DRC を `kicad-cli` で回す(DRC はファイルを読む)
 - ユーザーが GUI で同時に編集していると競合する。PCB 編集の前に一声かける
 - ファイルを手で書き換えて IPC の代わりにしない
 - 既知の癖(Konnect 0.12.1, route-test / route-test-smd で確認):
@@ -61,8 +61,6 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
     Konnect の DRC はこれを報告しないので、parity 付きの kicad-cli DRC を必ず回す
   - Freerouting は未使用ビアを残すことがある(`via_dangling`)。GUI の
     ツール > 配線とビアをクリーンアップ で消す
-  - GUI での SES 取り込み後、保存を依頼したがファイルに反映されていないことがあった(原因未特定)。取り込み後はファイルの
-    更新時刻か segment 数で保存を確かめ、未保存なら `save_project` で保存する
 
 ## 作業ルール
 
