@@ -1,0 +1,5 @@
+# ビルドに不要。projects/ は作業データ、.kicad-ipc/ はソケット (tar に載らない)
+.git
+projects/
+.kicad-ipc/
+.kicad-gui-config/

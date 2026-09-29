@@ -8,6 +8,7 @@ projects/**/*-backups/
 projects/**/*.kicad_prl
 projects/**/fp-info-cache
 projects/**/.history/
+projects/**/*.freerouting.log
 
 # OS
 .DS_Store

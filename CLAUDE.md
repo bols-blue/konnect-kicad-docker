@@ -30,7 +30,8 @@ Konnect のツールに渡してもコンテナからは見えない。
 | PCB の基板情報・レイヤ・外形の読み書き | **可(GUI 起動時)** | IPC 経由。`get_board_info` / `get_layer_list` / `add_board_outline` / `save_project` で動作確認済み |
 | PCB のフットプリント配置・移動・回転 | **可(GUI 起動時)・未検証** | 同じ IPC 経路だが個別には未確認 |
 | 配線(トラック/ビア/ゾーン)の編集 | **可(GUI 起動時)・未検証** | 同上 |
-| Freerouting による自動配線 | **不可** | イメージに Java / Freerouting が入っていない |
+| Freerouting による自動配線(DSN → SES) | **可** | Freerouting 2.3.0 + OpenJDK 25 を同梱。`check_freerouting` / `route_specctra_dsn` で動作確認済み |
+| 自動配線結果の基板への取り込み(SES インポート) | **可(GUI 起動時)・未検証** | PCB 編集なので IPC 経由 |
 | ライブ回路図ビューア | **不可** | システム WebView 依存でコンテナでは動かない |
 
 ### PCB系ツール(IPC)の前提

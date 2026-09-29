@@ -42,11 +42,37 @@ RUN cargo build --release -p konnect \
     && install -m 0755 target/release/konnect /konnect
 
 ###############################################################################
+# Stage 1b: Freerouting (自動配線)
+#   - Konnect は `java -jar freerouting*.jar` を headless MCP モードで起動する
+#   - Konnect のテストが対象にしている 2.3.0 に固定し、SHA-256 を検証する
+#     (値は GitHub Releases の asset digest)
+#   - builder と別ステージにして、更新時に cargo のキャッシュを壊さない
+###############################################################################
+FROM rust:1-bookworm AS freerouting
+
+ARG FREEROUTING_VERSION=2.3.0
+ARG FREEROUTING_SHA256=3cf18d608437740bc497db6b8ef5888e2e60a08de0def20691d1bad0c0e0ee24
+
+RUN set -eux; \
+    curl -fsSL -o /freerouting.jar \
+      "https://github.com/freerouting/freerouting/releases/download/v${FREEROUTING_VERSION}/freerouting-${FREEROUTING_VERSION}.jar"; \
+    echo "${FREEROUTING_SHA256}  /freerouting.jar" | sha256sum -c -
+
+###############################################################################
 # Stage 2: KiCad 10 公式イメージに載せる
 ###############################################################################
 FROM kicad/kicad:${KICAD_TAG}
 
 USER root
+
+# Freerouting 2.3.0 は Java 25 ターゲット (build.gradle の languageVersion)。
+# GUI は使わない (--gui.enabled=false) ので headless JRE で足りる。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openjdk-25-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG FREEROUTING_VERSION=2.3.0
+COPY --from=freerouting /freerouting.jar /opt/freerouting/freerouting-${FREEROUTING_VERSION}.jar
 
 # イメージのライブラリ配置を起動時ではなくビルド時に検証する。
 # レイアウトが変わっていたら黙って壊れるのではなくここで落とす。

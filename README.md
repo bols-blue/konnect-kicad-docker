@@ -35,7 +35,7 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 
 ```
 .
-├── Dockerfile              KiCad 公式イメージ + Konnect ビルド
+├── Dockerfile              KiCad 公式イメージ + Konnect ビルド + Freerouting/Java
 ├── docker-compose.yml      バッチ用ワークベンチ(任意)
 ├── Makefile                build / smoke / shell
 ├── .mcp.json               Claude Code 用 MCP 設定
@@ -88,7 +88,10 @@ make gui-stop
   (完了するまで IPC サーバが起動しない)
 - 公式イメージの GUI 利用はサポート外。フォント・IME・OpenGL で問題が出る可能性がある
 - 動作確認済み: 基板情報・レイヤ一覧の読み取り、外形追加、保存(KiCad 10.0.6)。
-  フットプリント配置・配線は未検証。Freerouting は Java が無いので不可
+  フットプリント配置・配線は未検証
+- 自動配線は Freerouting 2.3.0(SHA-256 検証済み)+ OpenJDK 25 をイメージに同梱。
+  Konnect が headless MCP モードで起動し、DSN → SES をローカルで処理する。
+  起動時に GitHub へ新版チェックの通信が出る(`KONNECT_NETWORK=none` なら出ないが部品検索も止まる)
 - ヘッドレス環境(SSH 先など)ではこの経路は使えない。回路図と ERC まで作って、
   あとはホストの KiCad に引き継ぐ
 
@@ -113,6 +116,7 @@ make gui-stop
 
 ```bash
 make build KICAD_TAG=10.0.5 KONNECT_REF=<タグ or コミットSHA>
+# Freerouting を上げる場合は Dockerfile の FREEROUTING_VERSION / FREEROUTING_SHA256 を両方更新
 ```
 
 ビルド済みイメージのバージョンは `make versions` で確認できる。
