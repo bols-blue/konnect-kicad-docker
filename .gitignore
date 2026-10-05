@@ -17,3 +17,6 @@ projects/**/~*.lck
 # KiCad IPC ソケット (scripts/kicad-gui.sh)
 .kicad-ipc/
 .kicad-gui-config/
+
+# Cloned project repositories (managed in their own git repos)
+projects/*/
