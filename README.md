@@ -62,6 +62,16 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 **ホストの `./projects` がコンテナの `/work`。** Konnect に渡すパスは常に
 `/work/...` 形式にする。
 
+既存の KiCad プロジェクトを試すときは `projects/` の下に `git clone` する。
+`projects/*/` はこのリポジトリの `.gitignore` で除外しているので、クローンした
+リポジトリはそれ自身の git で管理する。ライブラリの絶対パスや KiCad 6 以前の
+ファイル形式など、取り込み時に直すべき点は `CLAUDE.md` の
+「既存プロジェクトの取り込み」にまとめてある。
+
+```bash
+cd projects && git clone <repo-url>
+```
+
 ## 設計上のポイント
 
 **ランタイムに KiCad 公式イメージを使っている。** 公式イメージは kicad-cli 利用を
@@ -183,6 +193,9 @@ smoke test を通したうえで GHCR に公開する。ビルド済みイメー
 | ERC でシンボルが軒並み見つからない | `make smoke` の項目 2 を確認。`sym-lib-table=NO` なら Dockerfile の `KICAD_CONFIG_VER` を実際の設定ディレクトリ名に合わせる |
 | `IPC connect failed` | KiCad GUI 未起動、または PCB エディタで対象基板を開いていない。`make gui` |
 | `make gui` で IPC ソケットが現れない | 初回ウィザードやダイアログで止まっていないか確認。`KONNECT_GUI_DEBUG=1 make gui` で前面実行 |
+| `make` が「ターゲットを make するルールがありません」 | `projects/` の下で実行している。`make -C <このリポジトリ> gui ...` |
+| クローンしたプロジェクトで ERC がライブラリ不足で大量に落ちる | プロジェクトの `sym-lib-table` / `fp-lib-table` がホストの絶対パスを指している。ライブラリをプロジェクト内にコピーし `${KIPRJMOD}` 基準にする |
+| Konnect の回路図編集が `stale_target` で拒否される | KiCad 6 以前の回路図。KiCad GUI で開いて保存する(`kicad-cli sch upgrade` では直らない) |
 | Rust ビルドが OOM で落ちる | Docker Desktop のメモリ割り当てを 8 GB 以上に |
 
 ## 参考

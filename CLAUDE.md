@@ -62,6 +62,52 @@ PCB 系ツールは、`make gui` で起動した KiCad 10 GUI(同じイメージ
   - Freerouting は未使用ビアを残すことがある(`via_dangling`)。GUI の
     ツール > 配線とビアをクリーンアップ で消す
 
+### 既存プロジェクトの取り込み
+
+外部リポジトリの KiCad プロジェクトは `projects/<repo>/` に `git clone` する。
+`projects/*/` は外側の `.gitignore` で除外してあり、クローンしたリポジトリは
+それ自身の git で管理する(コミットはクローン側に積む)。
+
+取り込み直後、編集の前に次の順で整える(2026-10 の isorated_powor_boad_v2 で確認):
+
+1. **ベースラインの ERC / DRC を回して違反数を記録する。** 以降の作業で
+   増減を比較する基準になる
+2. **ライブラリのパスを直す。** プロジェクトの `sym-lib-table` / `fp-lib-table` が
+   ホストの絶対パス(`/home/...`)を指しているとコンテナから見えず、
+   `lib_symbol_issues` / `footprint_link_issues` が大量に出る。外部ライブラリは
+   プロジェクト内(例: `libs/`)にコピーし、URI を `${KIPRJMOD}/...` にする
+3. **KiCad 6 以前の形式なら GUI で開いて保存する。** 回路図の先頭が
+   `(version 2021...)` などの古い形式で、トップレベルに `symbol_instances` があると、
+   Konnect の編集系ツールはすべて `stale_target`
+   (placed-symbol instance metadata disagrees)で拒否する。
+   - `kicad-cli sch upgrade` は **使わない**。`symbol_instances` を捨てるだけで
+     シンボルごとの `(instances ...)` を書かないため、Konnect は同じエラーを返す
+   - `annotate_schematic` でも修復できない
+   - `make gui` で回路図エディタを開いて保存してもらうのが正解。PCB と `.kicad_pro`
+     も一緒に新形式で保存されることがある
+   - 保存後、変換前後のネットリスト(`kicad-cli sch export netlist`)を比較し、
+     ERC / DRC の件数が変わっていないことを確認してから、変換だけを単独でコミットする
+4. GUI で開いたプロジェクトは `.history/` を作るので、クローン側の `.gitignore` に追加する
+
+### Konnect の既知の癖(回路図・ライブラリ)
+
+Konnect 0.12.1 / KiCad 10.0.6、2026-10 に確認。
+
+- 既存シンボルのピン型を変えるツールは無い。`create_symbol` で同じ形・同じピン位置の
+  シンボルを `.kicad_sym` に作り、`register_symbol_library`(project スコープ)→
+  `replace_component` で差し替える。`graphics` で本体を描けばピン座標は指定どおりに書かれる
+- **`update_symbols_from_library` は埋め込みシンボルを置き換えず、同じ名前のコピーを
+  追加することがある。** KiCad は先にあるコピーを使うので変更が効かず、ファイルも
+  不正な状態になる。ライブラリを変えたら ERC で反映を確認する。反映できないときは
+  GUI の ツール > ライブラリからシンボルを更新 を人間が使う
+- `get_schematic_view` の SVG はコンテナ内の `/tmp` に出るのでホストから見えない。
+  見た目を確認するときは `kicad-cli sch export pdf` で `/work` に出し、ホストの
+  `pdftoppm` で PNG にする
+- PWR_FLAG を電源シンボルと同じ点に置くと絵が重なりやすい。回転させるか、空いている
+  場所にある同じネットの電源シンボルに置く
+- DC-DC などの出力ピンが `output` 型だと、PWR_FLAG(`power_out`)と
+  `pin_to_pin` エラーになる。PWR_FLAG で隠さず、シンボルのピン型を `power_out` に直す
+
 ## 作業ルール
 
 1. **書き込んでよいのは `/work` (= `./projects`) 配下のみ。**
@@ -158,6 +204,8 @@ scripts/kicad-cli.sh pcb export drill   --output /work/demo/fab/ /work/demo/demo
 | 症状 | 対処 |
 | --- | --- |
 | `IPC connect failed` / `ipc_available: false` | KiCad GUI 未起動か PCB エディタ未オープン。リトライせずユーザーに `make gui` を依頼 |
+| `make: ターゲット 'gui' を make するルールがありません` | カレントディレクトリが `projects/...` の下になっている。`make -C <リポジトリ直下> gui ...` で実行する |
+| 編集系ツールが `stale_target` で拒否する | 回路図が KiCad 6 以前の形式。「既存プロジェクトの取り込み」の手順 3 |
 | `make gui` で IPC ソケットが現れない | ダイアログで止まっていないか確認。設定は `./.kicad-gui-config` に永続化される |
 | シンボルが見つからない / ERC が大量に落ちる | グローバル `sym-lib-table` が見えているか `make smoke` で確認 |
 | ホストに root 所有のファイルができる | ラッパースクリプト経由で起動しているか確認(`--user` を付けている) |
