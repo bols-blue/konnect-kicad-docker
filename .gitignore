@@ -18,5 +18,8 @@ projects/**/~*.lck
 .kicad-ipc/
 .kicad-gui-config/
 
-# KiCad ActionPlugin native Specctra ブリッジ登録 (scripts/kicad-gui.sh / konnect-mcp.sh)
+# Cloned project repositories (managed in their own git repos)
+projects/*/
+
+# KiCad ActionPlugin native Specctra ブリッジ登録 (kicad-gui.sh / konnect-mcp.sh)
 .kicad-bridge/

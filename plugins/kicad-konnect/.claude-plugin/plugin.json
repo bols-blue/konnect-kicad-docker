@@ -1,0 +1,19 @@
+{
+  "name": "kicad-konnect",
+  "displayName": "KiCad Konnect",
+  "version": "0.1.0",
+  "description": "Konnect (KiCad MCP server) と KiCad 10 の CLI を Docker で動かし、回路図の生成 → ERC → 製造ファイル出力までを支援する",
+  "author": { "name": "bols-blue" },
+  "homepage": "https://github.com/bols-blue/konnect-kicad-docker",
+  "repository": "https://github.com/bols-blue/konnect-kicad-docker",
+  "keywords": ["kicad", "pcb", "schematic", "erc", "drc", "mcp"],
+  "mcpServers": {
+    "konnect": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/konnect-mcp.sh"],
+      "env": {
+        "KONNECT_DEFAULT_PROJECTS": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

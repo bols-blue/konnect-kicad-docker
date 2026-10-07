@@ -2,9 +2,14 @@
   "mcpServers": {
     "konnect": {
       "command": "bash",
-      "args": ["scripts/konnect-mcp.sh"],
+      "args": [
+        "plugins/kicad-konnect/scripts/konnect-mcp.sh"
+      ],
       "env": {
-        "KONNECT_IMAGE": "konnect-kicad:10"
+        "KONNECT_IMAGE": "konnect-kicad:10",
+        "KONNECT_PROJECTS": "projects",
+        "KONNECT_IPC_DIR": ".kicad-ipc",
+        "KONNECT_BRIDGE_DIR_HOST": ".kicad-bridge"
       }
     }
   }

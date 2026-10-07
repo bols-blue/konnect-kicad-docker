@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "konnect": {
+      "command": "bash",
+      "args": [
+        "./scripts/konnect-mcp.sh"
+      ],
+      "cwd": ".",
+      "env_vars": [
+        "KONNECT_PROJECTS",
+        "KONNECT_IMAGE",
+        "KONNECT_NETWORK",
+        "KONNECT_IPC_DIR",
+        "KONNECT_GUI_NAME",
+        "KONNECT_BRIDGE_DIR_HOST",
+        "HOME",
+        "XDG_STATE_HOME",
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG"
+      ],
+      "startup_timeout_sec": 60
+    }
+  }
+}

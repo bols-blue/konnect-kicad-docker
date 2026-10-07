@@ -4,7 +4,7 @@
 #
 # 構成B: 回路図編集(S式直接編集) + ERC/DRC + 製造ファイル出力までを
 #        コンテナ内で完結させる。PCBのインタラクティブ編集(IPC API)は
-#        GUIプロセスが必要なので、scripts/kicad-gui.sh で同じイメージの
+#        GUIプロセスが必要なので、plugins/kicad-konnect/scripts/kicad-gui.sh で同じイメージの
 #        KiCad GUI を X11 転送で起動し、IPC ソケットを Konnect と共有する。
 #
 # ランタイムは KiCad 公式イメージ。公式イメージは kicad-cli 利用を
@@ -108,7 +108,7 @@ COPY --from=builder /konnect-commit.txt /etc/konnect-commit.txt
 # GUI コンテナの PCB エディタが起動時に読み込み、settings.json の
 # native_specctra_bridge=true によって認証付きループバック HTTP ブリッジを立てる。
 # 登録ファイルは KONNECT_BRIDGE_DIR に置かれ、MCP コンテナと共有する
-# (scripts/kicad-gui.sh と scripts/konnect-mcp.sh が同じディレクトリをマウントする)。
+# (plugins/kicad-konnect/scripts/kicad-gui.sh と konnect-mcp.sh が同じディレクトリをマウントする)。
 # ブリッジは 127.0.0.1 で待ち受けるので、MCP コンテナは GUI コンテナの
 # ネットワーク名前空間に相乗りする (--network container:<GUI>、ホストには非公開)。
 COPY --from=builder /src/plugin /usr/share/kicad/scripting/plugins/konnect

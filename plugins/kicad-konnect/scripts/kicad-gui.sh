@@ -3,24 +3,17 @@
 # PCB 系ツールは KiCad の IPC API 経由なので、これが起動して対象基板を
 # 開いている間だけ Konnect から使える。
 #
-#   scripts/kicad-gui.sh                          # プロジェクトマネージャを起動
-#   scripts/kicad-gui.sh /work/demo/demo.kicad_pro
-#   scripts/kicad-gui.sh --stop
+#   kicad-gui.sh                          # プロジェクトマネージャを起動
+#   kicad-gui.sh /work/demo/demo.kicad_pro
+#   kicad-gui.sh --stop
 #
-# IPC ソケットはホストの ${KONNECT_IPC_DIR} (既定 ./.kicad-ipc) を
+# IPC ソケットはホストの ${KONNECT_IPC_DIR} (既定 ~/.local/state/konnect-kicad/ipc) を
 # 両コンテナの /tmp/kicad にマウントして共有する。
 # パスは kicad-cli.sh と同じくコンテナ側の /work/... で指定すること。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/.." && pwd)"
-
-IMAGE="${KONNECT_IMAGE:-konnect-kicad:10}"
-PROJECTS="${KONNECT_PROJECTS:-${ROOT}/projects}"
-IPC_DIR="${KONNECT_IPC_DIR:-${ROOT}/.kicad-ipc}"
-# KiCad ActionPlugin の native Specctra ブリッジ登録ファイル置き場 (GUI と MCP で共有)。
-BRIDGE_DIR="${KONNECT_BRIDGE_DIR_HOST:-${ROOT}/.kicad-bridge}"
-CONFIG_DIR="${KONNECT_GUI_CONFIG:-${ROOT}/.kicad-gui-config}"
+. "${HERE}/_env.sh"
 NAME="${KONNECT_GUI_NAME:-konnect-kicad-gui}"
 
 running() { docker ps --format '{{.Names}}' | grep -qx "${NAME}"; }
@@ -37,7 +30,9 @@ if running; then
   exit 1
 fi
 
+konnect_check_projects
 mkdir -p "${PROJECTS}" "${IPC_DIR}" "${BRIDGE_DIR}"
+echo "/work = ${PROJECTS}" >&2
 
 # GUI の設定は永続化する。コンテナの HOME は毎回まっさらなので、そのままだと
 # 起動のたびに初回セットアップウィザードが出て IPC サーバの起動前で止まる。
@@ -88,7 +83,7 @@ echo "KiCad GUI 起動待ち (初回はセットアップウィザードを完�
 for _ in $(seq 1 "${KONNECT_GUI_TIMEOUT:-300}"); do
   if [ -S "${IPC_DIR}/api.sock" ]; then
     echo "KiCad GUI 起動: ${NAME} (IPC: ${IPC_DIR}/api.sock)"
-    echo "native Specctra ブリッジを使う場合: Konnect を GUI のネットワークに載せるため Claude Code の /mcp で konnect を再接続すること" >&2
+    echo "native Specctra ブリッジを使う場合: Konnect を GUI のネットワークに載せるため MCP クライアントで konnect を再接続すること (Claude Code は /mcp、Codex は再起動)" >&2
     exit 0
   fi
   running || { echo "KiCad が起動直後に終了した (--rm のためログは残らない。KONNECT_GUI_DEBUG=1 で前面実行して確認)" >&2; exit 1; }

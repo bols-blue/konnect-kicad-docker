@@ -39,7 +39,55 @@ make smoke
 claude
 ```
 
-Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体。
+Claude Code 側の動き方はスキル `plugins/kicad-konnect/skills/kicad-konnect/` に
+書いてある(このリポジトリでは `.claude/skills/` から読み込まれる)。これが本体。
+リポジトリ固有の約束は `CLAUDE.md`。
+
+## プラグインとして使う(Claude Code / Codex)
+
+このリポジトリは Claude Code と Codex のプラグインマーケットプレイスを兼ねている。
+プラグイン `kicad-konnect` を入れると、どのディレクトリでもスキルと `konnect`
+MCP サーバが使える。Docker イメージは別途必要(上の `make pull`、または
+`docker pull ghcr.io/bols-blue/konnect-kicad:10 && docker tag ghcr.io/bols-blue/konnect-kicad:10 konnect-kicad:10`)。
+
+Claude Code:
+
+```bash
+claude plugin marketplace add bols-blue/konnect-kicad-docker
+claude plugin install kicad-konnect@konnect-kicad
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add bols-blue/konnect-kicad-docker
+# Codex の /plugins から kicad-konnect をインストール
+```
+
+**`/work` にマウントされるのはエージェントを起動したディレクトリ。** 環境変数
+`KONNECT_PROJECTS` で上書きできる。ホームディレクトリ直下や `/` では安全のため
+起動を拒否する。
+
+- Claude Code: 起動ディレクトリ(`CLAUDE_PROJECT_DIR`)が既定
+- Codex: MCP サーバがプラグインのディレクトリで起動されるため、起動ディレクトリを
+  知る手段が無い。**`KONNECT_PROJECTS` の設定が必須**
+  (例: `KONNECT_PROJECTS=$PWD codex`)。
+  シェルのサンドボックスが Docker ソケットを塞ぐ
+  (`permission denied while trying to connect to the docker API`、codex-cli 0.160.1 で確認)。
+  `kicad-cli.sh` の実行時にサンドボックス外での実行を承認する
+- Codex: konnect の MCP ツール呼び出しには承認が要る。`codex exec`(非対話)では
+  承認できず `MCP tool call requires approval, but approval policy is never` で失敗する。
+  `default_tools_approval_mode = "auto"` を設定しても変わらなかった。対話モードで使うこと
+
+| 構成要素 | 場所 |
+| --- | --- |
+| Claude Code の manifest(MCP 設定込み) | `plugins/kicad-konnect/.claude-plugin/plugin.json` |
+| Codex の manifest / MCP 設定 | `plugins/kicad-konnect/.codex-plugin/plugin.json` / `codex-mcp.json` |
+| スキル | `plugins/kicad-konnect/skills/kicad-konnect/` |
+| マーケットプレイス | `.claude-plugin/marketplace.json`(Claude Code)/ `.agents/plugins/marketplace.json`(Codex) |
+
+IPC ソケットと GUI 設定は `~/.local/state/konnect-kicad/` に置く
+(`KONNECT_IPC_DIR` / `KONNECT_GUI_CONFIG` で変更可)。
 
 ## ディレクトリ
 
@@ -49,18 +97,35 @@ Claude Code 側の動き方は `CLAUDE.md` に書いてある。これが本体�
 ├── docker-compose.yml      バッチ用ワークベンチ(任意)
 ├── Makefile                pull / build / smoke / shell / gui
 ├── .github/workflows/      イメージのビルド・smoke test・GHCR 公開
-├── .mcp.json               Claude Code 用 MCP 設定
-├── CLAUDE.md               Claude Code への作業指示(可否の線引き・ルール・手順)
-├── scripts/
-│   ├── konnect-mcp.sh      MCP stdio 起動ラッパー
-│   ├── kicad-cli.sh        ホストから kicad-cli を叩くラッパー
-│   ├── kicad-gui.sh        KiCad GUI を X11 転送で起動 (PCB系ツール用)
-│   └── smoke-test.sh       疎通確認
-└── projects/               作業領域。コンテナの /work にマウントされる
+├── .mcp.json               このリポジトリで作業するときの MCP 設定
+├── CLAUDE.md               このリポジトリ固有の約束
+├── .claude-plugin/         Claude Code のマーケットプレイス定義
+├── .agents/plugins/        Codex のマーケットプレイス定義
+├── .claude/skills/         スキルへのシンボリックリンク
+├── plugins/kicad-konnect/  プラグイン本体
+│   ├── .claude-plugin/     Claude Code の manifest
+│   ├── .codex-plugin/      Codex の manifest (+ codex-mcp.json)
+│   ├── skills/kicad-konnect/  スキル(可否の線引き・ルール・手順・既知の癖)
+│   └── scripts/
+│       ├── _env.sh         作業領域・IPC の場所の決定(共通)
+│       ├── konnect-mcp.sh  MCP stdio 起動ラッパー
+│       ├── kicad-cli.sh    ホストから kicad-cli を叩くラッパー
+│       ├── kicad-gui.sh    KiCad GUI を X11 転送で起動 (PCB系ツール用)
+│       └── smoke-test.sh   疎通確認
+└── projects/               作業領域。make / .mcp.json 経由ではコンテナの /work にマウントされる
 ```
 
-**ホストの `./projects` がコンテナの `/work`。** Konnect に渡すパスは常に
+**このリポジトリでは、ホストの `./projects` がコンテナの `/work`。** Konnect に渡すパスは常に
 `/work/...` 形式にする。
+
+既存の KiCad プロジェクトを試すときは `projects/` の下に `git clone` する。
+`projects/*/` はこのリポジトリの `.gitignore` で除外しているので、クローンした
+リポジトリはそれ自身の git で管理する。ライブラリの絶対パスや KiCad 6 以前の
+ファイル形式など、取り込み時に直すべき点はスキルの `references/import-existing.md` にまとめてある。
+
+```bash
+cd projects && git clone <repo-url>
+```
 
 ## 設計上のポイント
 
@@ -93,16 +158,16 @@ make gui PROJECT=/work/demo/demo.kicad_pro   # KiCad が X11 (Wayland なら XWa
 make gui-stop
 ```
 
-- IPC ソケットはホストの `./.kicad-ipc` を GUI / Konnect 両コンテナの
+- IPC ソケットはホストの `./.kicad-ipc`(プラグインとして使うときは `~/.local/state/konnect-kicad/ipc`)を GUI / Konnect 両コンテナの
   `/tmp/kicad` にマウントして共有する。Konnect には `KICAD_API_SOCKET` で固定パスを渡す
   (Konnect のソケット自動検出は起動時に一度だけなので、GUI を後から起動しても繋がるように)
-- GUI の設定は `./.kicad-gui-config` に永続化する。初回だけセットアップウィザードが出る
+- GUI の設定は `./.kicad-gui-config`(プラグインでは `~/.local/state/konnect-kicad/gui-config`)に永続化する。初回だけセットアップウィザードが出る
   (完了するまで IPC サーバが起動しない)
 - 公式イメージの GUI 利用はサポート外。フォント・IME・OpenGL で問題が出る可能性がある
 - 動作確認済み: 回路図 → PCB 反映、フットプリント配置、外形追加、保存、
   DSN 出力 → Freerouting → SES 取り込み → DRC の通し(THT 部品の基板)。
   SMD 受動部品 (roundrect パッド) は Konnect が DSN 出力を拒否するので、
-  DSN 出力と SES 取り込みは GUI で人が行う。詳細は `CLAUDE.md` の可否表
+  DSN 出力と SES 取り込みは GUI で人が行う。詳細はスキルの可否表
 - 自動配線は Freerouting 2.3.0(SHA-256 検証済み)+ OpenJDK 25 をイメージに同梱。
   Konnect が headless MCP モードで起動し、DSN → SES をローカルで処理する。
   起動時に GitHub へ新版チェックの通信が出る(`KONNECT_NETWORK=none` なら出ないが部品検索も止まる)
@@ -178,11 +243,14 @@ smoke test を通したうえで GHCR に公開する。ビルド済みイメー
 | 症状 | 対処 |
 | --- | --- |
 | `make build` がライブラリ検証で落ちる | KiCad イメージのディレクトリ構成が変わっている。エラー出力の `ls` 結果を見て Dockerfile のパスを修正 |
-| Claude Code が konnect を認識しない | `claude mcp list` で状態を確認。`.mcp.json` の相対パスはプロジェクトルート基準。ダメなら `scripts/konnect-mcp.sh` を絶対パスに書き換える |
+| Claude Code が konnect を認識しない | `claude mcp list` で状態を確認。`.mcp.json` の相対パスはプロジェクトルート基準。ダメなら `plugins/kicad-konnect/scripts/konnect-mcp.sh` を絶対パスに書き換える |
 | `image not found` | `make pull` / `make build` 未実行、または `KONNECT_IMAGE` の値が `.mcp.json` と不一致 |
 | ERC でシンボルが軒並み見つからない | `make smoke` の項目 2 を確認。`sym-lib-table=NO` なら Dockerfile の `KICAD_CONFIG_VER` を実際の設定ディレクトリ名に合わせる |
-| `IPC connect failed` | KiCad GUI 未起動、または PCB エディタで対象基板を開いていない。`make gui` |
+| `IPC connect failed` | KiCad GUI 未起動、または PCB エディタで対象基板を開いていない。`make gui`。プラグインとこのリポジトリの `.mcp.json` では IPC の置き場が違うので、GUI も同じ側から起動する |
 | `make gui` で IPC ソケットが現れない | 初回ウィザードやダイアログで止まっていないか確認。`KONNECT_GUI_DEBUG=1 make gui` で前面実行 |
+| `make` が「ターゲットを make するルールがありません」 | `projects/` の下で実行している。`make -C <このリポジトリ> gui ...` |
+| クローンしたプロジェクトで ERC がライブラリ不足で大量に落ちる | プロジェクトの `sym-lib-table` / `fp-lib-table` がホストの絶対パスを指している。ライブラリをプロジェクト内にコピーし `${KIPRJMOD}` 基準にする |
+| Konnect の回路図編集が `stale_target` で拒否される | KiCad 6 以前の回路図。KiCad GUI で開いて保存する(`kicad-cli sch upgrade` では直らない) |
 | Rust ビルドが OOM で落ちる | Docker Desktop のメモリ割り当てを 8 GB 以上に |
 
 ## 参考

@@ -1,0 +1,20 @@
+{
+  "name": "konnect-kicad",
+  "interface": {
+    "displayName": "Konnect KiCad"
+  },
+  "plugins": [
+    {
+      "name": "kicad-konnect",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kicad-konnect"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
