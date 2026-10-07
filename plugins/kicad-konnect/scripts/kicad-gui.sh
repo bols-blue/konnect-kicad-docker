@@ -31,7 +31,7 @@ if running; then
 fi
 
 konnect_check_projects
-mkdir -p "${PROJECTS}" "${IPC_DIR}"
+mkdir -p "${PROJECTS}" "${IPC_DIR}" "${BRIDGE_DIR}"
 echo "/work = ${PROJECTS}" >&2
 
 # GUI の設定は永続化する。コンテナの HOME は毎回まっさらなので、そのままだと
@@ -55,6 +55,7 @@ args=(
   --volume /tmp/.X11-unix:/tmp/.X11-unix:ro
   --volume "${PROJECTS}:/work"
   --volume "${IPC_DIR}:/tmp/kicad"
+  --volume "${BRIDGE_DIR}:/konnect-bridge"
   --volume "${CONFIG_DIR}:/konnect-home/.config/kicad"
   --workdir /work
 )
@@ -82,6 +83,7 @@ echo "KiCad GUI 起動待ち (初回はセットアップウィザードを完�
 for _ in $(seq 1 "${KONNECT_GUI_TIMEOUT:-300}"); do
   if [ -S "${IPC_DIR}/api.sock" ]; then
     echo "KiCad GUI 起動: ${NAME} (IPC: ${IPC_DIR}/api.sock)"
+    echo "native Specctra ブリッジを使う場合: Konnect を GUI のネットワークに載せるため MCP クライアントで konnect を再接続すること (Claude Code は /mcp、Codex は再起動)" >&2
     exit 0
   fi
   running || { echo "KiCad が起動直後に終了した (--rm のためログは残らない。KONNECT_GUI_DEBUG=1 で前面実行して確認)" >&2; exit 1; }

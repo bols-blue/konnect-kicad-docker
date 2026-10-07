@@ -14,6 +14,7 @@ export KONNECT_IMAGE      = $(IMAGE)
 export KONNECT_PROJECTS   = $(PROJECTS)
 export KONNECT_IPC_DIR    = $(CURDIR)/.kicad-ipc
 export KONNECT_GUI_CONFIG = $(CURDIR)/.kicad-gui-config
+export KONNECT_BRIDGE_DIR_HOST = $(CURDIR)/.kicad-bridge
 
 .PHONY: help build rebuild pull smoke shell gui gui-stop cli versions clean
 

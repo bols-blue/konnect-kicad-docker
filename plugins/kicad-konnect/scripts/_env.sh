@@ -24,6 +24,8 @@ PROJECTS="$(konnect_abs "${KONNECT_PROJECTS:-${KONNECT_DEFAULT_PROJECTS:-$(pwd)}
 PROJECTS="${PROJECTS%/}"
 IPC_DIR="$(konnect_abs "${KONNECT_IPC_DIR:-${STATE_DIR}/ipc}")"
 CONFIG_DIR="$(konnect_abs "${KONNECT_GUI_CONFIG:-${STATE_DIR}/gui-config}")"
+# KiCad ActionPlugin の native Specctra ブリッジ登録ファイル置き場 (GUI と MCP で共有)。
+BRIDGE_DIR="$(konnect_abs "${KONNECT_BRIDGE_DIR_HOST:-${STATE_DIR}/bridge}")"
 
 # 誤って広すぎる場所や、プラグイン自身 (Codex は MCP をプラグインの場所で起動する)
 # を /work にしないよう止める。

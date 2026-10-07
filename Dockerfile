@@ -44,6 +44,16 @@ RUN git init -q . \
     && git checkout -q FETCH_HEAD \
     && git rev-parse HEAD > /konnect-commit.txt
 
+# このリポジトリで管理する Konnect へのパッチ (patches/konnect/*.patch) を当てる。
+# 現在のパッチ: KiCad 本体の Specctra DSN 出力 / SES 取り込みを ActionPlugin
+# ブリッジ経由で使うツール (export_specctra_dsn_native / import_specctra_ses_native)。
+# AGPL-3.0: 改変部分のソースはこの patches/ ディレクトリで公開している。
+COPY patches/konnect/ /patches/
+RUN set -eux; \
+    git -c user.email=build@local -c user.name=build am --3way /patches/*.patch; \
+    { cat /konnect-commit.txt; ls /patches/*.patch | xargs -n1 basename | sed 's/^/+ /'; } > /konnect-commit.tmp; \
+    mv /konnect-commit.tmp /konnect-commit.txt
+
 # schematic-viewer は別ワークスペース かつ system webview 依存のためビルドしない
 RUN cargo build --release -p konnect \
     && install -m 0755 target/release/konnect /konnect
@@ -93,6 +103,21 @@ RUN set -eux; \
 
 COPY --from=builder /konnect /usr/local/bin/konnect
 COPY --from=builder /konnect-commit.txt /etc/konnect-commit.txt
+
+# --- Konnect ActionPlugin (KiCad 本体の Specctra DSN/SES ブリッジ) --------------
+# GUI コンテナの PCB エディタが起動時に読み込み、settings.json の
+# native_specctra_bridge=true によって認証付きループバック HTTP ブリッジを立てる。
+# 登録ファイルは KONNECT_BRIDGE_DIR に置かれ、MCP コンテナと共有する
+# (plugins/kicad-konnect/scripts/kicad-gui.sh と konnect-mcp.sh が同じディレクトリをマウントする)。
+# ブリッジは 127.0.0.1 で待ち受けるので、MCP コンテナは GUI コンテナの
+# ネットワーク名前空間に相乗りする (--network container:<GUI>、ホストには非公開)。
+COPY --from=builder /src/plugin /usr/share/kicad/scripting/plugins/konnect
+RUN set -eux; \
+    rm -rf /usr/share/kicad/scripting/plugins/konnect/tests; \
+    printf '{\n  "native_specctra_bridge": true\n}\n' \
+        > /usr/share/kicad/scripting/plugins/konnect/settings.json; \
+    mkdir -p /konnect-bridge; chmod 0777 /konnect-bridge
+ENV KONNECT_BRIDGE_DIR=/konnect-bridge
 
 # --- ライブラリ探索パス -------------------------------------------------------
 ENV KICAD10_SYMBOL_DIR=/usr/share/kicad/symbols \
