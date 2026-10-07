@@ -9,6 +9,48 @@ PCB のインタラクティブ編集(部品配置・配線)は KiCad の GUI �
 ローカルのデスクトップ環境では `make gui` で同じイメージの KiCad GUI を X11 転送で
 起動し、その IPC ソケットを Konnect と共有することで PCB 系ツールも使える。
 
+## 使い方(Claude Code)
+
+プラグイン `kicad-konnect` として入れると、どのディレクトリでも使える。
+
+```bash
+# 1. Docker イメージを取得 (初回のみ)
+docker pull ghcr.io/bols-blue/konnect-kicad:10
+docker tag ghcr.io/bols-blue/konnect-kicad:10 konnect-kicad:10
+
+# 2. プラグインをインストール (Claude Code 内の /plugin からでも可)
+claude plugin marketplace add bols-blue/konnect-kicad-docker
+claude plugin install kicad-konnect@konnect-kicad
+
+# 3. 作業ディレクトリで起動 (このディレクトリがコンテナの /work になる)
+mkdir -p ~/kicad-work && cd ~/kicad-work && git init
+claude
+```
+
+1. `/mcp` で `plugin:kicad-konnect:konnect` が connected になっていることを確認する
+2. 「/work/demo に KiCad プロジェクトを作って、抵抗を 1 つ置いて ERC して」のように頼む
+   - KiCad の話をすればスキルは自動で読み込まれる
+   - `/kicad-konnect:kicad-konnect` で明示的に呼ぶこともできる
+
+**作業領域の指定:**
+- `/work` にする場所は `KONNECT_PROJECTS=/path/to/dir claude` で変えられる
+- ホームディレクトリ直下や `/` で起動すると、安全のため konnect は起動しない
+
+**PCB 編集・自動配線(GUI が必要):** 次の順で操作する。起動コマンドは Claude に聞けば、インストール先のパスで教えてくれる。
+1. プラグインの `scripts/kicad-gui.sh /work/<name>/<name>.kicad_pro` で KiCad GUI を起動する
+2. PCB エディタで基板を開く
+3. `/mcp` で konnect を再接続する
+   - native Specctra ブリッジ(自動配線用の DSN 出力・SES 取り込み)を使うときは必須
+   - GUI を起動し直したら、再接続もやり直す
+
+**更新:** `claude plugin marketplace update konnect-kicad` のあと、プラグインを入れ直す。
+
+**このリポジトリの中ではプラグインは不要:**
+- ルートの `.mcp.json` とスキルへのリンクで動く(`/work` は `./projects`)
+- プラグインを入れたままここで起動すると konnect が 2 つ立つので、`/plugin` で無効にする
+
+Codex で使う場合や、構成の詳細は後述の「プラグインとして使う」を参照。
+
 ## 前提
 
 - Docker(Compose v2 同梱のもの)、Linux x86_64(KiCad 公式イメージが amd64 のみ)
