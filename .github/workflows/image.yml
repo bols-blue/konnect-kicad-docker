@@ -15,7 +15,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
-      - scripts/**
+      - plugins/kicad-konnect/scripts/**
       - .github/workflows/image.yml
   workflow_dispatch:
 
@@ -63,7 +63,7 @@ jobs:
       - name: Smoke test
         env:
           KONNECT_IMAGE: konnect-kicad:ci
-        run: bash scripts/smoke-test.sh
+        run: bash plugins/kicad-konnect/scripts/smoke-test.sh
 
       - uses: docker/login-action@v3
         with:

@@ -3,22 +3,17 @@
 # PCB 系ツールは KiCad の IPC API 経由なので、これが起動して対象基板を
 # 開いている間だけ Konnect から使える。
 #
-#   scripts/kicad-gui.sh                          # プロジェクトマネージャを起動
-#   scripts/kicad-gui.sh /work/demo/demo.kicad_pro
-#   scripts/kicad-gui.sh --stop
+#   kicad-gui.sh                          # プロジェクトマネージャを起動
+#   kicad-gui.sh /work/demo/demo.kicad_pro
+#   kicad-gui.sh --stop
 #
-# IPC ソケットはホストの ${KONNECT_IPC_DIR} (既定 ./.kicad-ipc) を
+# IPC ソケットはホストの ${KONNECT_IPC_DIR} (既定 ~/.local/state/konnect-kicad/ipc) を
 # 両コンテナの /tmp/kicad にマウントして共有する。
 # パスは kicad-cli.sh と同じくコンテナ側の /work/... で指定すること。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/.." && pwd)"
-
-IMAGE="${KONNECT_IMAGE:-konnect-kicad:10}"
-PROJECTS="${KONNECT_PROJECTS:-${ROOT}/projects}"
-IPC_DIR="${KONNECT_IPC_DIR:-${ROOT}/.kicad-ipc}"
-CONFIG_DIR="${KONNECT_GUI_CONFIG:-${ROOT}/.kicad-gui-config}"
+. "${HERE}/_env.sh"
 NAME="${KONNECT_GUI_NAME:-konnect-kicad-gui}"
 
 running() { docker ps --format '{{.Names}}' | grep -qx "${NAME}"; }
@@ -35,7 +30,9 @@ if running; then
   exit 1
 fi
 
+konnect_check_projects
 mkdir -p "${PROJECTS}" "${IPC_DIR}"
+echo "/work = ${PROJECTS}" >&2
 
 # GUI の設定は永続化する。コンテナの HOME は毎回まっさらなので、そのままだと
 # 起動のたびに初回セットアップウィザードが出て IPC サーバの起動前で止まる。

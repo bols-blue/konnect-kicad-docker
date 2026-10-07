@@ -1,0 +1,14 @@
+{
+  "name": "konnect-kicad",
+  "description": "Konnect (KiCad MCP server) + KiCad 10 を Docker で動かすプラグイン",
+  "owner": {
+    "name": "bols-blue"
+  },
+  "plugins": [
+    {
+      "name": "kicad-konnect",
+      "source": "./plugins/kicad-konnect",
+      "description": "Konnect + KiCad 10 (Docker) で回路図の生成 → ERC → 製造ファイル出力"
+    }
+  ]
+}

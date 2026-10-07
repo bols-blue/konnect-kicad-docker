@@ -6,9 +6,14 @@ GHCR_IMAGE  ?= ghcr.io/bols-blue/konnect-kicad:10
 BUILD_ARGS   = $(if $(KICAD_TAG),--build-arg KICAD_TAG=$(KICAD_TAG)) \
                $(if $(KONNECT_REF),--build-arg KONNECT_REF=$(KONNECT_REF))
 PROJECTS    ?= $(CURDIR)/projects
+SCRIPTS      = plugins/kicad-konnect/scripts
 
-export KONNECT_IMAGE    = $(IMAGE)
-export KONNECT_PROJECTS = $(PROJECTS)
+# このリポジトリで作業するときは ./projects を /work にし、IPC と GUI 設定も
+# リポジトリ内に置く (プラグインとして使うときの既定は scripts/_env.sh)
+export KONNECT_IMAGE      = $(IMAGE)
+export KONNECT_PROJECTS   = $(PROJECTS)
+export KONNECT_IPC_DIR    = $(CURDIR)/.kicad-ipc
+export KONNECT_GUI_CONFIG = $(CURDIR)/.kicad-gui-config
 
 .PHONY: help build rebuild pull smoke shell gui gui-stop cli versions clean
 
@@ -34,8 +39,8 @@ pull:
 	docker tag $(GHCR_IMAGE) $(IMAGE)
 
 smoke:
-	@chmod +x scripts/*.sh
-	@bash scripts/smoke-test.sh
+	@chmod +x $(SCRIPTS)/*.sh
+	@bash $(SCRIPTS)/smoke-test.sh
 
 shell:
 	docker run --rm -it \
@@ -44,16 +49,16 @@ shell:
 		--entrypoint bash $(IMAGE)
 
 gui:
-	@bash scripts/kicad-gui.sh $(PROJECT)
+	@bash $(SCRIPTS)/kicad-gui.sh $(PROJECT)
 
 gui-stop:
-	@bash scripts/kicad-gui.sh --stop
+	@bash $(SCRIPTS)/kicad-gui.sh --stop
 
 cli:
-	@bash scripts/kicad-cli.sh $(ARGS)
+	@bash $(SCRIPTS)/kicad-cli.sh $(ARGS)
 
 versions:
-	@echo -n "kicad-cli: "; bash scripts/kicad-cli.sh version
+	@echo -n "kicad-cli: "; bash $(SCRIPTS)/kicad-cli.sh version
 	@echo -n "konnect commit: "; docker run --rm --entrypoint cat $(IMAGE) /etc/konnect-commit.txt
 
 clean:

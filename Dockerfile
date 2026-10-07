@@ -4,7 +4,7 @@
 #
 # 構成B: 回路図編集(S式直接編集) + ERC/DRC + 製造ファイル出力までを
 #        コンテナ内で完結させる。PCBのインタラクティブ編集(IPC API)は
-#        GUIプロセスが必要なので、scripts/kicad-gui.sh で同じイメージの
+#        GUIプロセスが必要なので、plugins/kicad-konnect/scripts/kicad-gui.sh で同じイメージの
 #        KiCad GUI を X11 転送で起動し、IPC ソケットを Konnect と共有する。
 #
 # ランタイムは KiCad 公式イメージ。公式イメージは kicad-cli 利用を

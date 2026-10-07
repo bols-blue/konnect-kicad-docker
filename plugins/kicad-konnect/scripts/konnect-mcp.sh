@@ -4,22 +4,20 @@
 #
 # 重要: stdout は JSON-RPC 専用。echo などで汚さないこと(全て >&2 へ)。
 #
-# PCB 系ツールは scripts/kicad-gui.sh で起動した KiCad GUI の IPC ソケットに
+# PCB 系ツールは kicad-gui.sh で起動した KiCad GUI の IPC ソケットに
 # 繋ぐ。Konnect 起動時点で GUI が無くても接続先が決まるよう、パスは
 # KICAD_API_SOCKET で固定している(自動検出は起動時に一度だけ行われるため)。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/.." && pwd)"
-
-IMAGE="${KONNECT_IMAGE:-konnect-kicad:10}"
-PROJECTS="${KONNECT_PROJECTS:-${ROOT}/projects}"
-IPC_DIR="${KONNECT_IPC_DIR:-${ROOT}/.kicad-ipc}"
+. "${HERE}/_env.sh"
+konnect_check_projects
 
 mkdir -p "${PROJECTS}" "${IPC_DIR}" >&2
+echo "konnect: /work = ${PROJECTS}" >&2
 
 if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
-  echo "konnect: image '${IMAGE}' not found. run 'make build' first." >&2
+  echo "konnect: image '${IMAGE}' not found. run 'docker pull ghcr.io/bols-blue/konnect-kicad:10 && docker tag ghcr.io/bols-blue/konnect-kicad:10 ${IMAGE}' first." >&2
   exit 1
 fi
 

@@ -6,8 +6,12 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${HERE}/.." && pwd)"
 IMAGE="${KONNECT_IMAGE:-konnect-kicad:10}"
+
+# 疎通確認はファイルを作らないが、念のため使い捨ての作業領域をマウントする
+KONNECT_PROJECTS="$(mktemp -d)"
+export KONNECT_PROJECTS
+trap 'rmdir "${KONNECT_PROJECTS}" 2>/dev/null' EXIT
 
 fail=0
 step() { printf '\n=== %s\n' "$1"; }
@@ -55,8 +59,8 @@ fi
 
 printf '\n'
 if [ "${fail}" -eq 0 ]; then
-  echo "すべて通過しました。.mcp.json を読ませて Claude Code を起動してください。"
+  echo "すべて通過しました。"
 else
-  echo "失敗した項目があります。README.md のトラブルシュートを参照してください。"
+  echo "失敗した項目があります。トラブルシュートを参照してください。"
 fi
 exit "${fail}"
